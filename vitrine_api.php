@@ -434,8 +434,9 @@ case 'listar_produtos':
 case 'listar_produtos_admin':
     $uid = requireOwner();
 
+    $canonicalColumn = uplar_catalogo_schema_ready($pdo) ? ', categoria_id' : '';
     $s = $pdo->prepare("
-        SELECT id, nome, codigo, preco, quantidade, imagem,
+        SELECT id, nome, codigo, preco, quantidade, imagem {$canonicalColumn},
                COALESCE(vitrine_exposto, 0) AS vitrine_exposto,
                COALESCE(vitrine_destaque, 'none') AS vitrine_destaque,
                COALESCE(vitrine_destaque_ordem, 0) AS vitrine_destaque_ordem
