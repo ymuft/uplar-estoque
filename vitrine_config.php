@@ -5,6 +5,7 @@ session_start();
 require 'db.php';
 require 'helpers.php';
 require_once __DIR__ . '/includes/vitrine_experience.php';
+require_once __DIR__ . '/includes/catalog_categories.php';
 require_once __DIR__ . '/includes/business_profile_runtime.php';
 require_once __DIR__ . '/includes/tracking_runtime.php';
 require_once __DIR__ . '/includes/vitrine_featured.php';
@@ -32,6 +33,7 @@ $businessProfileForVitrine = uplar_business_profile_read($pdo, $user_id);
 $businessPresetForVitrine = uplar_business_profile_get($businessProfileForVitrine['segmento']);
 $experienceMode = uplar_vitrine_experience_mode($cfg['experiencia_json'] ?? null);
 $experiencePrefs = uplar_vitrine_experience_preferences($cfg['experiencia_json'] ?? null);
+$canonicalCategoriesReady = uplar_catalogo_schema_ready($pdo);
 // Somente para formulário administrativo ainda não salvo: o modo sugerido
 // não altera a vitrine pública nem publica uma configuração incompleta.
 if (empty($cfg['experiencia_json'])) {
@@ -403,6 +405,8 @@ a{color:inherit;text-decoration:none} button{font-family:inherit;cursor:pointer}
 <script src="assets/app-theme.js?v=20260723"></script>
 <link rel="stylesheet" href="assets/vitrine-experience.css?v=20261009.1">
 <link rel="stylesheet" href="assets/vitrine-experience-admin.css?v=20261009.1">
+<link rel="stylesheet" href="assets/catalog-categories-admin.css?v=20261010.1">
+<script src="assets/catalog-categories-admin.js?v=20261010.1" defer></script>
 <script src="assets/vitrine-experience-admin.js?v=20261009.1"></script>
 </head>
 <body>
@@ -524,7 +528,13 @@ a{color:inherit;text-decoration:none} button{font-family:inherit;cursor:pointer}
                         <label class="xp-setting"><input type="checkbox" id="xpFeatured" <?= $experiencePrefs['mostrar_destaques'] ? 'checked' : '' ?>><span><strong>Mostrar destaques e promoções</strong><small>Os produtos continuam no catálogo se esta seção estiver oculta.</small></span></label>
                         <div class="fl"><label for="xpUnavailable">Produtos esgotados</label><select id="xpUnavailable"><option value="mostrar" <?= $experiencePrefs['indisponiveis']==='mostrar'?'selected':'' ?>>Mostrar como esgotados</option><option value="ocultar" <?= $experiencePrefs['indisponiveis']==='ocultar'?'selected':'' ?>>Ocultar do catálogo</option></select></div>
                     </div>
-                    <div id="experienceCategories" class="xp-categories"></div>
+                    <?php if ($canonicalCategoriesReady): ?>
+                    <div id="canonicalCategoriesAdmin" class="cc-admin" data-source="<?= htmlspecialchars($experiencePrefs['fonte_categorias'],ENT_QUOTES,'UTF-8') ?>" data-csrf="<?= htmlspecialchars(get_csrf_token(),ENT_QUOTES,'UTF-8') ?>"><p class="hint">Carregando categorias…</p></div>
+                    <?php else: ?><p class="hint">A organização unificada estará disponível após a migration M3 autorizada. Suas categorias atuais continuam funcionando.</p><?php endif; ?>
+                    <div id="legacyCategoryEditor" <?= ($canonicalCategoriesReady && $experiencePrefs['fonte_categorias']==='canonico')?'hidden':'' ?>>
+                        <?php if ($canonicalCategoriesReady): ?><p class="hint">Organização legada da vitrine: preservada até a migração e ativação da nova fonte.</p><?php endif; ?>
+                        <div id="experienceCategories" class="xp-categories"></div>
+                    </div>
                 </section>
 
                 <section class="store-section" id="storeSectionAparencia" role="tabpanel" aria-labelledby="storeTabAparencia" data-store-panel="aparencia" hidden>
