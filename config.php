@@ -3,6 +3,7 @@ session_start();
 require 'db.php';
 require 'helpers.php';
 require_once __DIR__ . '/includes/tracking_runtime.php';
+require_once __DIR__ . '/includes/business_profile_runtime.php';
 
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['username'])) {
     header("Location: login.php"); exit;
@@ -45,6 +46,8 @@ $empresa = $stmt2->fetch() ?: [
     'logo_path'=>'','logo_size'=>120
 ];
 
+$businessProfile = uplar_business_profile_read($pdo, (int)$user_id);
+$businessPreset = uplar_business_profile_get($businessProfile['segmento']);
 header("X-Content-Type-Options: nosniff");
 header("X-Frame-Options: DENY");
 
@@ -371,6 +374,7 @@ if (!$is_admin && $sub['ativa'] && $sub['expirando']): ?>
             <div class="cfg-nav-item" data-sec="whatsapp">
                 <span class="ms material-symbols-outlined">phone_iphone</span>WhatsApp / Vendas
             </div>
+            <div class="cfg-nav-item" data-sec="negocio"><span class="ms material-symbols-outlined">storefront</span>Perfil do negócio</div>
             <div class="cfg-nav-item" data-sec="empresa">
                 <span class="ms material-symbols-outlined">business</span>Dados da Empresa
             </div>
@@ -439,6 +443,22 @@ if (!$is_admin && $sub['ativa'] && $sub['expirando']): ?>
                             <span class="ms material-symbols-outlined">lock</span>Alterar Senha
                         </button>
                     </div>
+                </div>
+            </div>
+
+            <!-- ════ SEÇÃO: PERFIL DO NEGÓCIO ════ -->
+            <div class="section" id="sec-negocio">
+                <div class="card anim d3">
+                    <div class="card-head"><div class="card-head-ico p"><span class="ms material-symbols-outlined">storefront</span></div>
+                        <div><div class="card-title">Perfil do negócio</div><div class="card-sub">Personalize as sugestões iniciais de cadastro e vitrine, sem restringir recursos.</div></div>
+                    </div>
+                    <p style="font-size:.92rem;font-weight:700;margin:0 0 .3rem"><?= htmlspecialchars($businessPreset['nome'] ?? 'Ainda não selecionado', ENT_QUOTES, 'UTF-8') ?></p>
+                    <p style="font-size:.8rem;color:var(--muted);margin:0 0 1rem">Experiência sugerida: <?= htmlspecialchars(['cardapio'=>'Cardápio','loja'=>'Loja / e-commerce','padrao'=>'Padrão'][$businessPreset['modo_sugerido'] ?? 'padrao'], ENT_QUOTES, 'UTF-8') ?>. A escolha do perfil não modifica produtos ou pedidos existentes.</p>
+                    <?php if ($businessProfile['ready']): ?>
+                      <a href="perfil_negocio.php" class="btn btn-p" style="display:inline-flex;align-items:center;text-decoration:none"> <?= $businessPreset ? 'Revisar meu perfil' : 'Preparar meu negócio' ?></a>
+                    <?php else: ?>
+                      <p style="color:var(--muted);font-size:.8rem">Esta configuração ficará disponível após a migration de banco autorizada.</p>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -896,6 +916,7 @@ function goSec(sec){
     if(window.innerWidth<=860){sb_.classList.remove('open');ov_.classList.remove('on');document.body.style.overflow='';}
 }
 document.querySelectorAll('.cfg-nav-item').forEach(el=>el.addEventListener('click',()=>goSec(el.dataset.sec)));
+if(location.hash==='#negocio')goSec('negocio');
 
 /* ── toast ── */
 let toastTimer;
