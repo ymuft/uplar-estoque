@@ -11,6 +11,7 @@ require 'db.php';
 require 'helpers.php';
 require_once __DIR__ . '/includes/commercial_origin.php';
 require_once __DIR__ . '/includes/product_sizes.php';
+require_once __DIR__ . '/includes/catalog_categories.php';
 require_once __DIR__ . '/includes/product_complements.php';
 require_once __DIR__ . '/includes/product_complements_admin.php';
 send_security_headers();
@@ -1042,6 +1043,12 @@ if ($acao === "adicionar") {
     $preco_custo = (float)$custoRaw;
     $qtd = (int)($_POST['quantidade'] ?? 0);
     $desc = trim($_POST['descricao'] ?? '');
+    $categoriaRecebida = array_key_exists('categoria_id', $_POST);
+    try {
+        $categoriaId = $categoriaRecebida ? uplar_catalogo_parse_input($_POST['categoria_id']) : null;
+        if ($categoriaRecebida && !uplar_catalogo_schema_ready($pdo)) uplar_api_json(['ok'=>false,'error'=>'Categorias ainda não estão disponíveis.'],409);
+        if ($categoriaId !== null && !uplar_catalogo_category($pdo,$user_id,$categoriaId)) throw new InvalidArgumentException('Categoria inválida ou de outra empresa.');
+    } catch (InvalidArgumentException $e) { uplar_api_json(['ok'=>false,'error'=>$e->getMessage()],422); }
     $imagem = null;
 
     if (!empty($_FILES['imagem']['name'])) {
@@ -1063,9 +1070,10 @@ if ($acao === "adicionar") {
         if ($newProductId <= 0) {
             throw new PDOException('ID do produto não foi gerado.');
         }
+        if ($categoriaRecebida) uplar_catalogo_assign($pdo,$user_id,$newProductId,$categoriaId);
         $pdo->commit();
         uplar_api_json(["ok" => true, "id" => $newProductId]);
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
@@ -1109,6 +1117,12 @@ if ($acao === "editar") {
     $preco_custo = (float)$custoRaw;
     $qtd = (int)($_POST['quantidade'] ?? 0);
     $desc = trim($_POST['descricao'] ?? '');
+    $categoriaRecebida = array_key_exists('categoria_id', $_POST);
+    try {
+        $categoriaId = $categoriaRecebida ? uplar_catalogo_parse_input($_POST['categoria_id']) : null;
+        if ($categoriaRecebida && !uplar_catalogo_schema_ready($pdo)) uplar_api_json(['ok'=>false,'error'=>'Categorias ainda não estão disponíveis.'],409);
+        if ($categoriaId !== null && !uplar_catalogo_category($pdo,$user_id,$categoriaId)) throw new InvalidArgumentException('Categoria inválida ou de outra empresa.');
+    } catch (InvalidArgumentException $e) { uplar_api_json(['ok'=>false,'error'=>$e->getMessage()],422); }
 
     $stmt = $pdo->prepare("SELECT id, imagem FROM produtos WHERE id = ? AND user_id = ?");
     $stmt->execute([$id, $user_id]);
@@ -1143,9 +1157,10 @@ if ($acao === "editar") {
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
+        if ($categoriaRecebida) uplar_catalogo_assign($pdo,$user_id,$id,$categoriaId);
         $pdo->commit();
         uplar_api_json(["ok" => true]);
-    } catch (PDOException $e) {
+    } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
