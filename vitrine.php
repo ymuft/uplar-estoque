@@ -6,6 +6,7 @@
 session_start();
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/includes/vitrine_experience.php';
+require_once __DIR__ . '/includes/catalog_categories.php';
 
 $pdo  = get_pdo();
 $slug = trim($_GET['loja'] ?? '');
@@ -26,6 +27,7 @@ $experience = function_exists('uplar_vitrine_experience_preferences')
     ? uplar_vitrine_experience_preferences($cfg['experiencia_json'] ?? null)
     : array_merge(['modo' => $experienceMode, 'categorias' => [], 'mostrar_destaques' => true, 'indisponiveis' => 'mostrar', 'entrega_habilitada' => true, 'retirada_habilitada' => true, 'pedidos_habilitados' => true], uplar_vitrine_experience_data($cfg['experiencia_json'] ?? null));
 
+$experience = uplar_catalogo_public_prefs($pdo, (int)$owner['id'], $experience);
 $nome_loja = $cfg['nome_loja']   ?? $owner['username'];
 $descricao = $cfg['descricao']   ?? '';
 $cor       = preg_match('/^#[0-9a-fA-F]{6}$/', $cfg['cor_primaria'] ?? '') ? $cfg['cor_primaria'] : '#3b6ff5';

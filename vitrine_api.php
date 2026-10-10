@@ -16,6 +16,7 @@ require __DIR__ . '/helpers.php';
 require __DIR__ . '/includes/vitrine_analytics.php';
 require __DIR__ . '/includes/vitrine_featured.php';
 require_once __DIR__ . '/includes/vitrine_experience.php';
+require_once __DIR__ . '/includes/catalog_categories.php';
 require_once __DIR__ . '/includes/commercial_origin.php';
 require_once __DIR__ . '/includes/product_sizes.php';
 require_once __DIR__ . '/includes/product_complements.php';
@@ -329,7 +330,7 @@ case 'get_config':
     $s = $pdo->prepare("SELECT * FROM vitrine_config WHERE user_id = ? LIMIT 1");
     $s->execute([(int)$user['id']]);
     $cfg = $s->fetch(PDO::FETCH_ASSOC) ?: [];
-    $experiencePreferences = uplar_vitrine_experience_preferences($cfg['experiencia_json'] ?? null);
+    $experiencePreferences = uplar_catalogo_public_prefs($pdo, (int)$user['id'], uplar_vitrine_experience_preferences($cfg['experiencia_json'] ?? null));
 
     apiok([
         'user_id'         => (int)$user['id'],
@@ -363,7 +364,7 @@ case 'listar_produtos':
     $cs->execute([(int)$user['id']]);
     $cfgRow      = $cs->fetch(PDO::FETCH_ASSOC);
     $mostrar_est = (bool)($cfgRow['mostrar_estoque'] ?? false);
-    $experiencePreferences = uplar_vitrine_experience_preferences($cfgRow['experiencia_json'] ?? null);
+    $experiencePreferences = uplar_catalogo_public_prefs($pdo, (int)$user['id'], uplar_vitrine_experience_preferences($cfgRow['experiencia_json'] ?? null));
     $showUnavailable = ($experiencePreferences['indisponiveis'] ?? 'ocultar') === 'mostrar';
     $showHighlights = !empty($experiencePreferences['mostrar_destaques']);
 
@@ -433,8 +434,9 @@ case 'listar_produtos':
 case 'listar_produtos_admin':
     $uid = requireOwner();
 
+    $canonicalColumn = uplar_catalogo_schema_ready($pdo) ? ', categoria_id' : '';
     $s = $pdo->prepare("
-        SELECT id, nome, codigo, preco, quantidade, imagem,
+        SELECT id, nome, codigo, preco, quantidade, imagem {$canonicalColumn},
                COALESCE(vitrine_exposto, 0) AS vitrine_exposto,
                COALESCE(vitrine_destaque, 'none') AS vitrine_destaque,
                COALESCE(vitrine_destaque_ordem, 0) AS vitrine_destaque_ordem
@@ -1250,6 +1252,9 @@ case 'salvar_config':
             if ($experienceOptionsPosted) {
                 $experienceOptions = json_decode((string)$_POST['experiencia_opcoes'], true, 512, JSON_THROW_ON_ERROR);
                 if (!is_array($experienceOptions)) apierr('As opções da experiência são inválidas.', 422);
+                // A origem das categorias só muda pela ação explícita do M3,
+                // nunca por configurações gerais abertas em outra aba.
+                unset($experienceOptions['fonte_categorias']);
             }
             if ($modoEnviado || $experienceOptionsPosted) {
                 $mergedExperience = uplar_vitrine_experience_merge($cfgAtual['experiencia_json'] ?? null, $experienceOptions ?? []);

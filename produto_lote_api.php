@@ -3,6 +3,7 @@ header('Content-Type: application/json; charset=utf-8');
 session_start();
 require 'db.php';
 require 'helpers.php';
+require_once __DIR__ . '/includes/catalog_categories.php';
 send_security_headers();
 
 function lote_json(array $data, int $status = 200): void {
@@ -77,7 +78,10 @@ if ($acao === 'publicar') {
     $drafts = $check->fetchAll();
     if (count($drafts) !== count($items)) lote_json(['ok'=>false, 'error'=>'Um ou mais rascunhos não foram encontrados.'], 404);
     $byId = []; foreach ($items as $item) $byId[(int)$item['id']] = $item;
-    $insert = $pdo->prepare('INSERT INTO produtos (user_id,nome,codigo,preco,preco_custo,quantidade,descricao,categoria,validade,imagem) VALUES (?,?,?,?,?,?,?,?,?,?)');
+    $canonicalReady = uplar_catalogo_schema_ready($pdo);
+    $insert = $pdo->prepare($canonicalReady
+        ? 'INSERT INTO produtos (user_id,nome,codigo,preco,preco_custo,quantidade,descricao,categoria,categoria_id,validade,imagem) VALUES (?,?,?,?,?,?,?,?,?,?,?)'
+        : 'INSERT INTO produtos (user_id,nome,codigo,preco,preco_custo,quantidade,descricao,categoria,validade,imagem) VALUES (?,?,?,?,?,?,?,?,?,?)');
     try {
         $pdo->beginTransaction();
         foreach ($drafts as $draft) {
@@ -90,7 +94,14 @@ if ($acao === 'publicar') {
             $validade = trim((string)($item['validade'] ?? ''));
             if ($validade !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $validade)) throw new RuntimeException('A validade deve ser uma data válida ou ficar em branco.');
             if ($nome === '' || $codigo === '' || $preco <= 0) throw new RuntimeException('Preencha nome, código e preço de todos os produtos.');
-            $insert->execute([$userId, mb_substr($nome,0,150), mb_substr($codigo,0,50), $preco, $precoCusto, $qtd, '', mb_substr(trim((string)($item['categoria'] ?? '')),0,80), $validade !== '' ? $validade : null, $draft['imagem']]);
+            $categoryText = trim((string)($item['categoria'] ?? ''));
+            if ($categoryText !== '') $categoryText = uplar_catalogo_validate_name($categoryText);
+            $categoryId = $canonicalReady && $categoryText !== '' ? uplar_catalogo_ensure($pdo,$userId,$categoryText) : null;
+            $values = [$userId, mb_substr($nome,0,150), mb_substr($codigo,0,50), $preco, $precoCusto, $qtd, '', $categoryText];
+            if ($canonicalReady) $values[] = $categoryId;
+            $values[] = $validade !== '' ? $validade : null;
+            $values[] = $draft['imagem'];
+            $insert->execute($values);
         }
         $delete = $pdo->prepare("DELETE FROM produto_lote_drafts WHERE user_id=? AND id IN ($in)");
         $delete->execute(array_merge([$userId], $ids));
