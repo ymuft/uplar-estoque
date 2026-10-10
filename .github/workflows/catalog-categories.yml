@@ -1,0 +1,56 @@
+name: Validacao M3 - categorias
+on:
+  pull_request:
+    paths:
+      - 'includes/catalog_categories.php'
+      - 'catalogo_categorias_api.php'
+      - 'api.php'
+      - 'produto_lote_api.php'
+      - 'produtos.php'
+      - 'vitrine.php'
+      - 'vitrine_api.php'
+      - 'vitrine_config.php'
+      - 'includes/vitrine_experience.php'
+      - 'assets/catalog-categories-admin.js'
+      - 'assets/catalog-categories-admin.css'
+      - 'sql/20261010_catalog_categories.sql'
+      - 'tests/catalog_categories_mysql_test.php'
+      - '.github/workflows/catalog-categories.yml'
+  workflow_dispatch:
+jobs:
+  m3:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: uplar_m3_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -ptest_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_mysql
+          coverage: none
+      - name: PHP lint (caminhos impactados)
+        run: |
+          for f in includes/catalog_categories.php catalogo_categorias_api.php api.php produto_lote_api.php produtos.php vitrine.php vitrine_api.php vitrine_config.php includes/vitrine_experience.php; do
+            php -l "$f" || exit 1
+          done
+      - name: Teste de integracao MySQL isolada
+        env:
+          UPLAR_TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=uplar_m3_ci;charset=utf8mb4
+          UPLAR_TEST_MYSQL_USER: root
+          UPLAR_TEST_MYSQL_PASSWORD: test_password
+        run: php tests/catalog_categories_mysql_test.php
+      - name: JS syntax
+        run: |
+          node --check assets/catalog-categories-admin.js
