@@ -760,6 +760,15 @@ button{font-family:inherit;cursor:pointer}
 
 <script>
 const CSRF = <?= json_encode(get_csrf_token()) ?>;
+// Contrato de sugestão visual: não controla permissões, estoque nem persistência.
+const BUSINESS_CONTEXT = <?= json_encode([
+    'segmento' => $businessPreset['segmento'] ?? null,
+    'familia' => $businessPreset['familia'] ?? null,
+    'modo_sugerido' => $businessPreset['modo_sugerido'] ?? 'padrao',
+    'categorias_sugeridas' => $businessPreset['categorias_sugeridas'] ?? [],
+    'prioridades_cadastro' => $businessPreset['prioridades_cadastro'] ?? [],
+    'perfil_concluido' => ($businessProfile['status_configuracao'] ?? '') === 'concluida',
+], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) ?>;
 const $ = id => document.getElementById(id);
 const esc = v => String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const R = v => 'R$\u00a0'+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
