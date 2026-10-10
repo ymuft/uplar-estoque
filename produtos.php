@@ -567,6 +567,19 @@ button{font-family:inherit;cursor:pointer}
                         <label>Descrição</label>
                         <textarea id="pDesc" rows="3" placeholder="<?= $businessFood ? 'Descreva ingredientes, preparo e o que acompanha o produto…' : 'Detalhe material, modelo, cores ou outras características…' ?>"></textarea>
                     </div>
+                    <div class="fl fw" id="pCategoriaControl" hidden>
+                        <label for="pCategoria">Categoria</label>
+                        <div style="display:flex;gap:.5rem;align-items:center;flex-wrap:wrap">
+                            <select id="pCategoria" style="flex:1;min-width:150px"><option value="">Sem categoria</option></select>
+                            <button class="pill pill-outline" type="button" id="btnCriarCategoria">+ Criar categoria</button>
+                        </div>
+                        <div id="pNovaCategoriaWrap" hidden style="display:flex;gap:.5rem;align-items:center;margin-top:.55rem;flex-wrap:wrap">
+                            <input id="pNovaCategoria" maxlength="80" placeholder="Nome da nova categoria" style="flex:1;min-width:140px">
+                            <button class="pill pill-solid" id="pSalvarCategoria" type="button">Criar</button>
+                            <button class="pill pill-outline" id="pCancelarCategoria" type="button">Cancelar</button>
+                        </div>
+                        <span class="hint">A mesma categoria será usada na vitrine, sem classificar novamente.</span>
+                    </div>
                 </div>
             </div>
 
@@ -760,6 +773,39 @@ button{font-family:inherit;cursor:pointer}
 
 <script>
 const CSRF = <?= json_encode(get_csrf_token()) ?>;
+let categoriasDisponiveis=[],categoriaSelecionada=null;
+function renderCategoriasProduto(){
+    const select=document.getElementById('pCategoria');if(!select)return;
+    select.replaceChildren(new Option('Sem categoria',''));
+    categoriasDisponiveis.forEach(c=>select.add(new Option(c.nome,String(c.id))));
+    select.value=categoriaSelecionada===null?'':String(categoriaSelecionada);
+    document.getElementById('pCategoriaControl').hidden=false;
+}
+async function carregarCategoriasProduto(){
+    try{
+        const r=await fetch('catalogo_categorias_api.php?acao=listar',{credentials:'same-origin'});
+        const j=await r.json();if(!r.ok||!j.ok)return;
+        categoriasDisponiveis=Array.isArray(j.categorias)?j.categorias:[];renderCategoriasProduto();
+    }catch(error){console.warn('[Categorias] Erro ao carregar:',error);}
+}
+document.addEventListener('DOMContentLoaded',carregarCategoriasProduto);
+document.addEventListener('click',async event=>{
+    if(event.target.closest('#btnCriarCategoria')){document.getElementById('pNovaCategoriaWrap').hidden=false;document.getElementById('pNovaCategoria').focus();}
+    if(event.target.closest('#pCancelarCategoria')){document.getElementById('pNovaCategoriaWrap').hidden=true;document.getElementById('pNovaCategoria').value='';}
+    if(event.target.closest('#pSalvarCategoria')){
+        const button=document.getElementById('pSalvarCategoria'),name=document.getElementById('pNovaCategoria').value.trim();
+        if(!name){toast('Informe o nome da categoria.','err');return;}
+        button.disabled=true;
+        try{
+            const body=new FormData();body.append('csrf_token',CSRF);body.append('nome',name);
+            const r=await fetch('catalogo_categorias_api.php?acao=criar',{method:'POST',body,credentials:'same-origin'});
+            const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'Erro ao criar categoria.');
+            categoriasDisponiveis=j.categorias||[];categoriaSelecionada=Number(j.categoria_id);renderCategoriasProduto();
+            document.getElementById('pNovaCategoriaWrap').hidden=true;document.getElementById('pNovaCategoria').value='';toast('Categoria disponível no cadastro.');
+        }catch(error){toast(error.message,'err');}finally{button.disabled=false;}
+    }
+});
+document.addEventListener('change',e=>{if(e.target.id==='pCategoria')categoriaSelecionada=e.target.value?Number(e.target.value):null;});
 // Contrato de sugestão visual: não controla permissões, estoque nem persistência.
 const BUSINESS_CONTEXT = <?= json_encode([
     'segmento' => $businessPreset['segmento'] ?? null,
@@ -1177,6 +1223,7 @@ function buildReview(){
             <div class="review-row"><span class="rr-l">Nome</span><span class="rr-v">${esc($('pNome').value||'—')}</span></div>
             <div class="review-row"><span class="rr-l">Código</span><span class="rr-v">${esc($('pCod').value||'—')}</span></div>
             <div class="review-row"><span class="rr-l">Descrição</span><span class="rr-v" style="max-width:60%;text-align:right;font-size:.78rem">${esc($('pDesc').value||'—')}</span></div>
+             ${!$('pCategoriaControl').hidden?'<div class="review-row"><span class="rr-l">Categoria</span><span class="rr-v">'+esc($('pCategoria').selectedOptions[0]?.textContent||'Sem categoria')+'</span></div>':''}
         </div>
         <div class="review-card">
             <div class="review-row"><span class="rr-l">Preço de venda</span><span class="rr-v" style="color:var(--p)">${R($('pPreco').value)}</span></div>
@@ -1196,7 +1243,7 @@ function buildReview(){
 $('btnNovo').addEventListener('click',()=>openM());
 function wizardDraftSnapshot(){
     return JSON.stringify({
-        nome:$('pNome').value,codigo:$('pCod').value,descricao:$('pDesc').value,preco:$('pPreco').value,custo:$('pCusto').value,
+        nome:$('pNome').value,codigo:$('pCod').value,descricao:$('pDesc').value,categoria:categoriaSelecionada,preco:$('pPreco').value,custo:$('pCusto').value,
         quantidade:$('pQtd').value,tamanhos:sizeDraft,validade:temValidade?$('pValidade').value:'',temValidade,
         personalizacao:customizationEnabled,imagem:$('fImg').files.length?$('fImg').files[0].name:$('prevI').src
     });
@@ -1230,6 +1277,8 @@ function openM(p=null){
     $('pCusto').value=p?Number(p.preco_custo||0).toFixed(2):'';
     $('pQtd').value=p?.quantidade??1;
     $('pDesc').value=p?.descricao??'';
+    categoriaSelecionada=p?.categoria_id?Number(p.categoria_id):null;
+    if(categoriasDisponiveis.length)renderCategoriasProduto();else carregarCategoriasProduto();
     customizationEnabled=false;
     customizationChoiceExplicit=false;
     customizationDisableConfirmed=false;
@@ -1459,6 +1508,7 @@ async function saveProduct(){
     fd.append('preco_custo',$('pCusto').value.trim() || '0');
     fd.append('quantidade',sizeDraft.length?String(sizeDraft.reduce((n,s)=>n+(Number(s.quantidade)||0),0)):$('pQtd').value.trim());
     fd.append('descricao',$('pDesc').value.trim());
+    if(!$('pCategoriaControl').hidden)fd.append('categoria_id',$('pCategoria').value);
     fd.append('validade', temValidade ? $('pValidade').value : '');
     fd.append('csrf_token',CSRF);
     if($('fImg').files[0])fd.append('imagem',$('fImg').files[0]);
