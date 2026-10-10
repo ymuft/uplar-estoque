@@ -8,6 +8,7 @@ on:
       - 'assets/storefront-menu.js'
       - 'assets/product-complements.js'
       - 'tests/storefront-menu.test.js'
+      - 'tests/product-wizard-regression.test.js'
       - 'tests/check-inline-php-js.php'
       - '.github/workflows/m4m5-ui.yml'
   workflow_dispatch:
@@ -30,7 +31,7 @@ jobs:
         run: |
           node --check assets/storefront-menu.js
           node --check assets/product-complements.js
-          node --test tests/storefront-menu.test.js
+          node --test tests/storefront-menu.test.js tests/product-wizard-regression.test.js
       - name: PHP-template inline JS parser check
         run: |
           php tests/check-inline-php-js.php
