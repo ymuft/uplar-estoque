@@ -41,7 +41,7 @@
         const pending=profile.preferencias_atendimento_pendentes||{};
         byId('bs-delivery').checked=pending.entrega===true;
         byId('bs-pickup').checked=pending.retirada===true;
-        byId('bs-apply-mode').checked=true;
+        byId('bs-apply-mode').checked=profile.status_configuracao!=='concluida';
         showStep(2);
     };
     const post=async(action,values)=>{
@@ -102,9 +102,13 @@
         }catch(e){notify(e.message);}
         finally{busy(button,false);}
     });
+    if(profile.status_configuracao==='concluida')byId('bs-skip').textContent='Cancelar alterações';
     byId('bs-skip').addEventListener('click',async()=>{
         const button=byId('bs-skip');busy(button,true);
-        try{await post('dismiss',{categorias:[],aplicar_modo:false});location.href='estoque.php';}
+        try{
+            if(profile.status_configuracao!=='concluida') await post('dismiss',{categorias:[],aplicar_modo:false});
+            location.href='estoque.php';
+        }
         catch(e){alert(e.message);busy(button,false);}
     });
     if(profile.status_configuracao==='em_andamento'&&segment)showConfig();
