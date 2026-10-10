@@ -6,6 +6,7 @@
     const byId=id=>document.getElementById(id);
     let segment=profile.segmento&&catalog[profile.segmento]?profile.segmento:null;
     let editedCategories=Array.isArray(profile.categorias_pendentes)?profile.categorias_pendentes.slice():[];
+    let categoriesDefined=profile.categorias_definidas===true;
     const choiceRadios=[...document.querySelectorAll('[name="segmento"]')];
     const notify=(message)=>{
         const error=byId('bs-error');
@@ -35,7 +36,7 @@
         byId('bs-profile-heading').textContent='Sua '+item.nome.toLowerCase()+' na Uplar';
         byId('bs-mode-label').textContent={cardapio:'Cardápio',loja:'Loja / e-commerce',padrao:'Padrão'}[item.modo_sugerido]||'Padrão';
         byId('bs-category-list').replaceChildren();
-        const initial=(profile.segmento===segment&&editedCategories.length)?editedCategories:item.categorias_sugeridas||[];
+        const initial=categoriesDefined?editedCategories:item.categorias_sugeridas||[];
         initial.forEach(addCategory);
         byId('bs-service-block').hidden=!isFood();
         const pending=profile.preferencias_atendimento_pendentes||{};
@@ -50,6 +51,7 @@
         payload.append('action',action);
         payload.append('segmento',segment||'');
         payload.append('categorias',JSON.stringify(values.categorias||[]));
+        payload.append('categorias_definidas',values.categorias_definidas?'1':'0');
         payload.append('aplicar_modo',values.aplicar_modo?'1':'0');
         payload.append('entrega',values.entrega?'1':'0');
         payload.append('retirada',values.retirada?'1':'0');
@@ -58,11 +60,11 @@
         if(!response.ok||!json.ok)throw new Error(json.error||'Não foi possível salvar.');
         return json;
     };
-    const values=()=>({categorias:categoriesFromUI(),aplicar_modo:byId('bs-apply-mode').checked,
+    const values=()=>({categorias:categoriesFromUI(),categorias_definidas:true,aplicar_modo:byId('bs-apply-mode').checked,
         entrega:isFood()&&byId('bs-delivery').checked,retirada:isFood()&&byId('bs-pickup').checked});
     const busy=(el,active)=>{if(el){el.disabled=active;el.setAttribute('aria-busy',active?'true':'false')}};
     choiceRadios.forEach(radio=>radio.addEventListener('change',()=>{
-        if(segment!==radio.value)editedCategories=[];
+        if(segment!==radio.value){editedCategories=[];categoriesDefined=false;}
         segment=radio.value;byId('bs-next').disabled=false;
     }));
     if(segment){const sel=choiceRadios.find(el=>el.value===segment);if(sel){sel.checked=true;byId('bs-next').disabled=false;}}
@@ -70,14 +72,14 @@
         const button=byId('bs-next');busy(button,true);
         try{
             if(profile.status_configuracao!=='concluida'){
-                await post('draft',{categorias:editedCategories,aplicar_modo:false});
+                await post('draft',{categorias:editedCategories,categorias_definidas:categoriesDefined,aplicar_modo:false});
             }
             showConfig();
         }
         catch(e){alert(e.message);}
         finally{busy(button,false);}
     });
-    byId('bs-back').addEventListener('click',()=>{editedCategories=categoriesFromUI();showStep(1)});
+    byId('bs-back').addEventListener('click',()=>{editedCategories=categoriesFromUI();categoriesDefined=true;showStep(1)});
     byId('bs-add-category').addEventListener('click',()=>addCategory(''));
     if(profile.status_configuracao==='concluida')byId('bs-save-later').textContent='Sair sem aplicar';
     byId('bs-save-later').addEventListener('click',async()=>{
