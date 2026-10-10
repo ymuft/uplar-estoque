@@ -3,14 +3,16 @@
 $obCollapsed = !empty($onboarding['collapsed']);
 $obCelebration = !empty($onboarding['show_celebration']);
 $obStore = $onboarding['store'];
+$obFood = ($onboarding['business_preset']['familia'] ?? '') === 'alimentacao';
+$obProfilePending = ($onboarding['business_profile']['status_configuracao'] ?? '') === 'em_andamento' && ($onboarding['status'] ?? '') === 'in_progress';
 ?>
 <section class="onboarding-card <?= $obCollapsed ? 'is-collapsed' : '' ?> <?= $obCelebration ? 'is-complete' : '' ?>" id="onboardingCard" data-csrf="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '') ?>" aria-labelledby="onboardingTitle">
     <div class="onboarding-main">
         <div class="onboarding-heading">
             <div class="onboarding-heading-copy">
-                <span class="onboarding-eyebrow"><?= $obCelebration ? 'Loja pronta para crescer' : 'Primeiros passos' ?></span>
-                <h2 id="onboardingTitle"><?= $obCelebration ? 'Sua loja está pronta ' : 'Bem-vindo à Uplar ' ?></h2>
-                <p><?= $obCelebration ? 'Você concluiu a configuração inicial. A dashboard agora acompanha sua operação.' : 'Vamos colocar sua loja para funcionar.' ?></p>
+                <span class="onboarding-eyebrow"><?= $obCelebration ? 'Loja pronta para crescer' : ($obFood ? 'Primeiros passos do cardápio' : 'Primeiros passos') ?></span>
+                <h2 id="onboardingTitle"><?= $obCelebration ? 'Sua loja está pronta ' : ($obFood ? 'Vamos montar seu cardápio' : 'Bem-vindo à Uplar') ?></h2>
+                <p><?= $obCelebration ? 'Você concluiu a configuração inicial. A dashboard agora acompanha sua operação.' : ($obFood ? 'Comece pelos itens, adicionais e informações de atendimento.' : 'Vamos colocar sua loja para funcionar.') ?></p>
             </div>
             <?php if (!$obCelebration): ?>
             <button class="onboarding-collapse" id="onboardingCollapse" type="button" aria-expanded="<?= $obCollapsed ? 'false' : 'true' ?>" title="<?= $obCollapsed ? 'Expandir' : 'Recolher' ?> primeiros passos">
@@ -18,6 +20,10 @@ $obStore = $onboarding['store'];
             </button>
             <?php endif; ?>
         </div>
+
+        <?php if ($obProfilePending): ?>
+        <div class="onboarding-tour-invite"><span class="material-symbols-outlined" aria-hidden="true">storefront</span><div><strong>Continue a configuração do seu negócio</strong><span>Suas sugestões de vitrine e categorias foram mantidas.</span></div><a class="onboarding-button primary" href="perfil_negocio.php">Retomar configuração</a></div>
+        <?php endif; ?>
 
         <div class="onboarding-progress-wrap">
             <div class="onboarding-progress-copy"><strong><?= (int)$onboarding['completed_steps'] ?> de <?= (int)$onboarding['total_steps'] ?> etapas concluídas</strong><span><?= (int)$onboarding['progress'] ?>%</span></div>
