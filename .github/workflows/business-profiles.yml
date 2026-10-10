@@ -1,0 +1,63 @@
+name: Validacao de perfis comerciais
+on:
+  pull_request:
+    paths:
+      - 'includes/business_profiles.php'
+      - 'includes/business_profile_runtime.php'
+      - 'business_profile_api.php'
+      - 'perfil_negocio.php'
+      - 'onboarding.php'
+      - 'includes/dashboard_onboarding.php'
+      - 'estoque.php'
+      - 'config.php'
+      - 'produtos.php'
+      - 'vitrine_config.php'
+      - 'vitrine_config.php'
+      - 'assets/business-setup.js'
+      - 'sql/20261010_business_profile.sql'
+      - 'tests/business_profile_mysql_test.php'
+      - 'tests/business_profile_runtime_test.php'
+      - 'tests/business_profiles_test.php'
+      - '.github/workflows/business-profiles.yml'
+  workflow_dispatch:
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: uplar_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -ptest_password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Preparar PHP 8.3
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_mysql
+          coverage: none
+      - name: PHP lint
+        run: |
+          for file in includes/business_profiles.php includes/business_profile_runtime.php business_profile_api.php perfil_negocio.php onboarding.php includes/dashboard_onboarding.php estoque.php config.php produtos.php vitrine_config.php; do
+            php -l "$file" || exit 1
+          done
+      - name: Unit tests
+        run: |
+          php tests/business_profiles_test.php
+          php tests/business_profile_runtime_test.php
+      - name: Integracao MySQL isolada
+        env:
+          UPLAR_TEST_MYSQL_DSN: mysql:host=127.0.0.1;port=3306;dbname=uplar_ci;charset=utf8mb4
+          UPLAR_TEST_MYSQL_USER: root
+          UPLAR_TEST_MYSQL_PASSWORD: test_password
+        run: php tests/business_profile_mysql_test.php
+      - name: JavaScript syntax
+        run: node --check assets/business-setup.js

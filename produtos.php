@@ -3,6 +3,7 @@ session_start();
 require 'db.php';
 require 'helpers.php';
 require_once __DIR__ . '/includes/tracking_runtime.php';
+require_once __DIR__ . '/includes/business_profile_runtime.php';
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['username'])) {
     header("Location: login.php");
     exit;
@@ -24,6 +25,9 @@ header('Cache-Control: no-cache, no-store, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 require 'subscription.php';
 $sub = check_and_block($user_id, $pdo);
+$businessProfile = uplar_business_profile_read($pdo, (int)$user_id);
+$businessPreset = uplar_business_profile_get($businessProfile['segmento']);
+$businessFood = ($businessPreset['familia'] ?? '') === 'alimentacao';
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
@@ -551,17 +555,17 @@ button{font-family:inherit;cursor:pointer}
                 <div class="fg">
                     <div class="fl fw">
                         <label>Nome do produto *</label>
-                        <input id="pNome" placeholder="Ex: Iogurte Natural 200g">
+                        <input id="pNome" placeholder="<?= $businessFood ? 'Ex: X-Bacon Artesanal' : 'Ex: Camisa esportiva' ?>">
                         <span class="hint">Como o produto aparecerá no catálogo</span>
                     </div>
                     <div class="fl fw">
                         <label>Código / SKU *</label>
-                        <input id="pCod" placeholder="Ex: IOG-001">
+                        <input id="pCod" placeholder="<?= $businessFood ? 'Ex: LAN-001' : 'Ex: CAM-001' ?>">
                         <span class="hint">Código único de identificação</span>
                     </div>
                     <div class="fl fw">
                         <label>Descrição</label>
-                        <textarea id="pDesc" rows="3" placeholder="Detalhe o produto, material, cor, tamanho…"></textarea>
+                        <textarea id="pDesc" rows="3" placeholder="<?= $businessFood ? 'Descreva ingredientes, preparo e o que acompanha o produto…' : 'Detalhe material, modelo, cores ou outras características…' ?>"></textarea>
                     </div>
                 </div>
             </div>
@@ -756,6 +760,15 @@ button{font-family:inherit;cursor:pointer}
 
 <script>
 const CSRF = <?= json_encode(get_csrf_token()) ?>;
+// Contrato de sugestão visual: não controla permissões, estoque nem persistência.
+const BUSINESS_CONTEXT = <?= json_encode([
+    'segmento' => $businessPreset['segmento'] ?? null,
+    'familia' => $businessPreset['familia'] ?? null,
+    'modo_sugerido' => $businessPreset['modo_sugerido'] ?? 'padrao',
+    'categorias_sugeridas' => $businessPreset['categorias_sugeridas'] ?? [],
+    'prioridades_cadastro' => $businessPreset['prioridades_cadastro'] ?? [],
+    'perfil_concluido' => ($businessProfile['status_configuracao'] ?? '') === 'concluida',
+], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) ?>;
 const $ = id => document.getElementById(id);
 const esc = v => String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const R = v => 'R$\u00a0'+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});

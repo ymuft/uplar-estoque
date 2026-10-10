@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/includes/business_profile_runtime.php';
 
 function onboarding_ensure_schema(PDO $pdo): void
 {
@@ -65,10 +66,13 @@ function get_onboarding_data(int $userId, PDO $pdo, bool $isAdmin = false): arra
         || (!empty($store['cor_primaria']) && strtolower((string)$store['cor_primaria']) !== '#3b6ff5');
     $configured = $slug !== '' && $storeName !== '' && $storeWhatsapp !== '';
     $shared = !empty($state['shared_at']) || $storeViews > 0 || $orders > 0;
+    $businessProfile = uplar_business_profile_read($pdo, $userId);
+    $businessPreset = uplar_business_profile_get($businessProfile['segmento']);
+    $isFood = ($businessPreset['familia'] ?? '') === 'alimentacao';
 
     $steps = [
         ['key'=>'account', 'title'=>'Conta criada', 'description'=>'Seu acesso à Uplar já está pronto.', 'done'=>true, 'href'=>null, 'action'=>null],
-        ['key'=>'products', 'title'=>'Adicione seus primeiros produtos', 'description'=>'Monte seu catálogo e organize o estoque.', 'done'=>$products > 0, 'href'=>'produtos.php', 'action'=>'Adicionar'],
+        ['key'=>'products', 'title'=>$isFood ? 'Cadastre seu primeiro item do cardápio' : 'Adicione seus primeiros produtos', 'description'=>$isFood ? 'Inclua pratos, bebidas e os adicionais necessários.' : 'Monte seu catálogo e organize o estoque.', 'done'=>$products > 0, 'href'=>'produtos.php', 'action'=>'Adicionar'],
         ['key'=>'store', 'title'=>'Personalize sua vitrine', 'description'=>'Adicione identidade, descrição ou imagens da loja.', 'done'=>$customized, 'href'=>'vitrine_config.php', 'action'=>'Personalizar'],
         ['key'=>'settings', 'title'=>'Configure as informações da loja', 'description'=>'Defina nome, endereço público e WhatsApp.', 'done'=>$configured, 'href'=>'vitrine_config.php', 'action'=>'Configurar'],
         ['key'=>'share', 'title'=>'Compartilhe sua loja', 'description'=>'Envie o link para seus primeiros clientes.', 'done'=>$shared, 'href'=>$slug !== '' ? '/' . rawurlencode($slug) : 'vitrine_config.php', 'action'=>$slug !== '' ? 'Compartilhar' : 'Criar link'],
@@ -99,6 +103,7 @@ function get_onboarding_data(int $userId, PDO $pdo, bool $isAdmin = false): arra
 
     return [
         'eligible'=>$eligible, 'visible'=>$visible, 'status'=>$status,
+        'business_profile'=>$businessProfile, 'business_preset'=>$businessPreset,
         'collapsed'=>!empty($state['collapsed']), 'show_celebration'=>$showCelebration,
         'tour_seen'=>!empty($state['tour_seen_at']),
         'steps'=>$steps, 'completed_steps'=>$completedSteps, 'total_steps'=>count($steps),

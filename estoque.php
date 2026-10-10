@@ -27,6 +27,10 @@ require 'subscription.php';
 $sub = check_and_block($user_id, $pdo); // redireciona para bloqueio.php se inativo
 require 'onboarding.php';
 $onboarding = get_onboarding_data((int)$user_id, $pdo, $is_admin);
+if (uplar_business_profile_should_autostart($pdo, (int)$user_id, $is_admin)) {
+    header('Location: perfil_negocio.php');
+    exit;
+}
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">
