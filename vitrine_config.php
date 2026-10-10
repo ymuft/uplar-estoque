@@ -28,13 +28,14 @@ $ativa      = (int)($udata['vitrine_ativa'] ?? 1);
 $cs = $pdo->prepare("SELECT * FROM vitrine_config WHERE user_id = ? LIMIT 1");
 $cs->execute([$user_id]);
 $cfg = $cs->fetch(PDO::FETCH_ASSOC) ?: [];
+$businessProfileForVitrine = uplar_business_profile_read($pdo, $user_id);
+$businessPresetForVitrine = uplar_business_profile_get($businessProfileForVitrine['segmento']);
 $experienceMode = uplar_vitrine_experience_mode($cfg['experiencia_json'] ?? null);
 $experiencePrefs = uplar_vitrine_experience_preferences($cfg['experiencia_json'] ?? null);
 // Somente para formulário administrativo ainda não salvo: o modo sugerido
 // não altera a vitrine pública nem publica uma configuração incompleta.
 if (empty($cfg['experiencia_json'])) {
-    $profileChoice = uplar_business_profile_read($pdo, $user_id);
-    $suggestedMode = $profileChoice['modo_pendente'] ?? null;
+    $suggestedMode = $businessProfileForVitrine['modo_pendente'] ?? null;
     if (in_array($suggestedMode, ['padrao', 'loja', 'cardapio'], true)) {
         $experienceMode = $suggestedMode;
         $experiencePrefs['modo'] = $suggestedMode;
@@ -501,6 +502,7 @@ a{color:inherit;text-decoration:none} button{font-family:inherit;cursor:pointer}
 
                 <section class="store-section" id="storeSectionExperiencia" role="tabpanel" aria-labelledby="storeTabExperiencia" data-store-panel="experiencia" hidden>
                     <div class="store-section-heading"><div><h3>Experiência da vitrine</h3><p>Como seus clientes costumam comprar?</p></div></div>
+                    <div style="border:1px solid var(--border);padding:.8rem 1rem;border-radius:10px;margin-bottom:1rem;display:flex;align-items:center;justify-content:space-between;gap:.8rem;flex-wrap:wrap"><div><strong style="font-size:.82rem">Perfil do negócio: <?= htmlspecialchars($businessPresetForVitrine['nome'] ?? 'Não definido', ENT_QUOTES, 'UTF-8') ?></strong><p style="font-size:.72rem;color:var(--muted);margin:.2rem 0 0">O perfil sugere um modo de apresentação, mas não restringe seus produtos.</p></div><a href="perfil_negocio.php" style="font-size:.78rem;font-weight:700;color:var(--p)"> <?= $businessPresetForVitrine ? 'Alterar perfil' : 'Escolher meu segmento' ?> →</a></div>
                     <fieldset class="experience-choices"><legend class="hint">Selecione a apresentação. Tamanhos e complementos estão disponíveis em todos os modos.</legend>
                         <?php foreach ([
                             'loja' => ['Loja / E-commerce', 'Produtos, fotos, tamanhos e variações.'],
