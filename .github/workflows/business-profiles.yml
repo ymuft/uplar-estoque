@@ -10,6 +10,8 @@ on:
       - 'includes/dashboard_onboarding.php'
       - 'estoque.php'
       - 'config.php'
+      - 'produtos.php'
+      - 'vitrine_config.php'
       - 'vitrine_config.php'
       - 'assets/business-setup.js'
       - 'tests/business_profile_runtime_test.php'
@@ -23,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: PHP lint
         run: |
-          for file in includes/business_profiles.php includes/business_profile_runtime.php business_profile_api.php perfil_negocio.php onboarding.php includes/dashboard_onboarding.php estoque.php config.php vitrine_config.php; do
+          for file in includes/business_profiles.php includes/business_profile_runtime.php business_profile_api.php perfil_negocio.php onboarding.php includes/dashboard_onboarding.php estoque.php config.php produtos.php vitrine_config.php; do
             php -l "$file" || exit 1
           done
       - name: Unit tests
