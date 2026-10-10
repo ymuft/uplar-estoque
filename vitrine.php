@@ -460,6 +460,7 @@ img{display:block;max-width:100%}
 }
 </style>
 <style><?php readfile(__DIR__ . '/assets/vitrine-experience.css'); ?></style>
+<script src="assets/storefront-menu.js?v=20261010.1"></script>
 </head>
 <body data-experience="<?= htmlspecialchars($experienceMode, ENT_QUOTES, 'UTF-8') ?>">
 <div class="app" id="app">
@@ -718,14 +719,19 @@ function productSelectedStock(){
 function gerarCats(){
     const cats=$('cats');cats.innerHTML='';cats.hidden=false;
     const configured=(EXPERIENCE.categorias||[]).filter(c=>Array.isArray(c.produto_ids)&&c.produto_ids.length);
-    let choices=configured.map(c=>({id:String(c.id),nome:String(c.nome),produto_ids:c.produto_ids}));
+    const visible=EXPERIENCE.indisponiveis==='ocultar'?produtos.filter(p=>productStock(p)>0):produtos;
+    const grouped=UplarStorefrontMenu.groupProducts(visible,configured);
+    let choices=grouped.groups.map(c=>({id:String(c.id),nome:String(c.nome),produto_ids:c.produtos.map(p=>Number(p.id))}));
+    if(document.body.dataset.experience==='cardapio'&&choices.length&&grouped.uncategorized.length){
+        choices.push({id:'outros',nome:'Sem categoria',produto_ids:grouped.uncategorized.map(p=>Number(p.id))});
+    }
     if(!choices.length&&document.body.dataset.experience==='padrao'){
         const legacy=[...new Set(produtos.map(p=>String(p.nome||'').split(' ')[0].toUpperCase()).filter(Boolean))].slice(0,8);
         choices=legacy.map(name=>({id:name,nome:name,legacy:true}));
     }
     if(!choices.length){cats.hidden=true;}else{
-        const all=document.createElement('button');all.className='cat-btn on';all.dataset.cat='todos';all.textContent='Todos';all.onclick=()=>setCat('todos',all);cats.appendChild(all);
-        choices.forEach(c=>{const button=document.createElement('button');button.className='cat-btn';button.dataset.cat=c.id;button.textContent=c.nome;button.onclick=()=>setCat(c.id,button);cats.appendChild(button);});
+        const all=document.createElement('button');all.className='cat-btn on';all.type='button';all.dataset.cat='todos';all.setAttribute('aria-pressed','true');all.textContent='Todos';all.onclick=()=>setCat('todos',all);cats.appendChild(all);
+        choices.forEach(c=>{const button=document.createElement('button');button.className='cat-btn';button.type='button';button.dataset.cat=c.id;button.setAttribute('aria-pressed','false');button.textContent=c.nome;button.onclick=()=>setCat(c.id,button);cats.appendChild(button);});
     }
     $('catalogTools').hidden=document.body.dataset.experience!=='loja';
     $('availabilityFilter').hidden=!produtos.some(p=>productStock(p)<1);
@@ -738,12 +744,50 @@ function gerarCats(){
     status.textContent=unavailable?'A loja está temporariamente sem receber pedidos.':disabledModes.join(' ');
 }
 
+let menuScrollFrame=0;
+function setMenuActiveCategory(category,ensureVisible=false){
+    const nav=$('cats');
+    for(const button of nav.querySelectorAll('.cat-btn')){
+        const on=button.dataset.cat===String(category);
+        button.classList.toggle('on',on);
+        button.setAttribute('aria-pressed',String(on));
+        if(on&&ensureVisible){
+            const rect=button.getBoundingClientRect(),bounds=nav.getBoundingClientRect();
+            if(rect.left<bounds.left+12||rect.right>bounds.right-12){
+                button.scrollIntoView({block:'nearest',inline:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+            }
+        }
+    }
+}
+function syncMenuCategoryOnScroll(){
+    menuScrollFrame=0;
+    if(document.body.dataset.experience!=='cardapio'||$('cats').hidden||buscaTxt)return;
+    const topbar=document.querySelector('.topbar');
+    const offset=(topbar?.getBoundingClientRect().height||0)+$('cats').getBoundingClientRect().height+14;
+    const sections=[...$('prodList').querySelectorAll('.menu-category')].map(section=>({
+        id:section.dataset.category,
+        top:section.getBoundingClientRect().top
+    }));
+    const active=UplarStorefrontMenu.categoryAtOffset(sections,offset);
+    setMenuActiveCategory(active,true);
+}
+function scheduleMenuCategorySync(){
+    if(menuScrollFrame)return;
+    menuScrollFrame=requestAnimationFrame(syncMenuCategoryOnScroll);
+}
 function setCat(cat,btn){
-    catAtual=cat;
-    document.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('on'));
-    btn.classList.add('on');
-    renderProdutos();
-    if(document.body.dataset.experience==='cardapio'&&cat!=='todos'){const section=document.getElementById(`menu-category-${CSS.escape(String(cat))}`);section?.scrollIntoView({behavior:'smooth',block:'start'});}
+    if(document.body.dataset.experience==='cardapio'&&$('prodList').querySelector('.menu-category')){
+        // Cardápio com seções: navega até a categoria sem esconder o restante.
+        catAtual='todos';
+        if(buscaTxt){buscaTxt='';$('busca').value='';renderProdutos();}
+        setMenuActiveCategory(cat,true);
+        const target=cat==='todos' ? $('catalogHead') : [...$('prodList').querySelectorAll('.menu-category')].find(s=>s.dataset.category===String(cat));
+        (target||$('prodList')).scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+    }else{
+        catAtual=cat;
+        setMenuActiveCategory(cat);
+        renderProdutos();
+    }
     storeTrack('category_filter');
 }
 
@@ -849,21 +893,17 @@ function renderProdutos(){
     $('secTitle').textContent=catAtual==='todos'?(configuredCategories.length||document.body.dataset.experience==='padrao'&&produtos.length?'Todos os produtos':'Produtos'):(selectedCategory?.nome||catAtual.charAt(0)+catAtual.slice(1).toLowerCase());
     if(!f.length){featuredSection.hidden=true;catalogHead.hidden=false;list.innerHTML='<div class="empty-state"><p>Nenhum produto encontrado.</p></div>';return;}
     if(document.body.dataset.experience==='cardapio'&&configuredCategories.length){
-        const showMenuHighlights=catAtual==='todos';
-        const menuHighlights=showMenuHighlights?destaques:[];
-        const highlightedIds=new Set(menuHighlights.map(p=>Number(p.id)));
-        featuredSection.hidden=!menuHighlights.length;
-        featuredList.innerHTML=menuHighlights.map(p=>cardProduto(p,true)).join('');
-        const groups=configuredCategories.map(category=>({
-            id:category.id,
-            nome:category.nome,
-            produtos:f.filter(p=>(categoryProductIds.get(String(category.id))||new Set()).has(Number(p.id))&&!highlightedIds.has(Number(p.id)))
-        })).filter(group=>group.produtos.length);
-        const assigned=new Set(groups.flatMap(group=>group.produtos.map(p=>Number(p.id))));
-        const uncategorized=f.filter(p=>!assigned.has(Number(p.id))&&!highlightedIds.has(Number(p.id)));
-        if(uncategorized.length)groups.push({id:'outros',nome:'Sem categoria',produtos:uncategorized});
-        catalogHead.hidden=!groups.length;
-        list.innerHTML=groups.map(group=>`<section class="menu-category" id="menu-category-${esc(group.id)}"><h2>${esc(group.nome)}</h2><div class="menu-category-products">${group.produtos.map(p=>cardProduto(p)).join('')}</div></section>`).join('');
+        // Destaques aparecem com selo dentro da própria categoria,
+        // evitando duplicar cards e categorias vazias na navegação.
+        featuredSection.hidden=true;
+        featuredList.replaceChildren();
+        const grouped=UplarStorefrontMenu.groupProducts(f,configuredCategories);
+        const groups=grouped.groups;
+        if(grouped.uncategorized.length)groups.push({id:'outros',nome:'Sem categoria',produtos:grouped.uncategorized});
+        catalogHead.hidden=true;
+        list.innerHTML=groups.map(group=>`<section class="menu-category" id="menu-category-${esc(group.id)}" data-category="${esc(group.id)}"><h2>${esc(group.nome)}</h2><div class="menu-category-products">${group.produtos.map(p=>cardProduto(p)).join('')}</div></section>`).join('');
+        if(buscaTxt)setMenuActiveCategory('todos');
+        else scheduleMenuCategorySync();
         return;
     }
     featuredSection.hidden=!destaques.length;catalogHead.hidden=!comuns.length;
@@ -1419,6 +1459,10 @@ window.visualViewport?.addEventListener('resize',()=>{const sheet=document.query
 
 document.addEventListener('DOMContentLoaded',()=>{
     carregarProdutos();restorePersistentCart().finally(updateCartCount);storeTrack('store_view');
+    if(document.body.dataset.experience==='cardapio'){
+        window.addEventListener('scroll',scheduleMenuCategorySync,{passive:true});
+        window.addEventListener('resize',scheduleMenuCategorySync,{passive:true});
+    }
     const header=document.querySelector('.topbar');if(header&&'ResizeObserver' in window)new ResizeObserver(()=>document.documentElement.style.setProperty('--store-header-height',header.getBoundingClientRect().height+'px')).observe(header);
     const nav=performance.getEntriesByType?.('navigation')?.[0];
     window.addEventListener('load',()=>storeTrack('page_load',null,Math.round(nav?.loadEventEnd||performance.now())),{once:true});
