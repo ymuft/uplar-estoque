@@ -2,6 +2,7 @@
 /** M3 integration, only isolated uplar_m3_ci MySQL database */
 declare(strict_types=1);
 require_once __DIR__.'/../includes/catalog_categories.php';
+require_once __DIR__.'/../includes/business_profile_runtime.php';
 require_once __DIR__.'/../includes/vitrine_experience.php';
 function ensureM3(bool $ok,string $msg): void {if(!$ok)throw new RuntimeException($msg);}
 $dsn=(string)getenv('UPLAR_TEST_MYSQL_DSN');
@@ -16,6 +17,8 @@ $pdo->exec("CREATE TABLE produtos (
  categoria VARCHAR(80) NULL,
  vitrine_exposto TINYINT(1) NOT NULL DEFAULT 1
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+$pdo->exec("CREATE TABLE empresa_config (user_id INT NOT NULL PRIMARY KEY,perfil_negocio_json JSON NULL)");
+$pdo->exec("CREATE TABLE vitrine_config (user_id INT NOT NULL PRIMARY KEY,experiencia_json JSON NULL)");
 $pdo->exec("INSERT INTO produtos(user_id,nome,codigo,categoria,vitrine_exposto)
 VALUES (11,'X-Bacon','LAN1','Sanduíches',1),(11,'Refrigerante','BEB1','Bebidas',1),
 (12,'Camisa Esportiva','CAM1','Vestuário',1),(11,'Produto oculto','OCULTO','Bebidas',0)");
@@ -52,4 +55,17 @@ $conflicts=uplar_catalogo_audit($pdo,11,$legacy['categorias']);
 ensureM3($conflicts['conflitos']>=1,'Mismatch should be reported, not overwritten.');
 ensureM3($conflicts['origem_manual']===1,'Manual association must remain readable.');
 ensureM3((int)$pdo->query('SELECT categoria_id FROM produtos WHERE id=1')->fetchColumn()===$burgers,'Audit must not mutate products.');
-echo "PASS — migration twice, tenant isolation, categorização, conflito, fallback legado, visibilidade.\n";
+$saved = uplar_business_profile_store($pdo, 13, [
+ 'segmento'=>'hamburgueria','status_configuracao'=>'concluida',
+ 'categorias_pendentes'=>['Hambúrgueres','Combos','Bebidas'],
+ 'categorias_definidas'=>true,'aplicar_modo'=>false,
+]);
+ensureM3(isset($saved['categorias_aplicadas_em']),'Onboarding must apply confirmed categories.');
+ensureM3(count(uplar_catalogo_list($pdo,13))===3,'Exactly three categories expected.');
+uplar_business_profile_store($pdo,13,[
+ 'segmento'=>'hamburgueria','status_configuracao'=>'concluida',
+ 'categorias_pendentes'=>['Hambúrgueres','Combos','Bebidas'],
+ 'categorias_definidas'=>true,'aplicar_modo'=>false,
+]);
+ensureM3(count(uplar_catalogo_list($pdo,13))===3,'Reconfirmation cannot duplicate categories.');
+echo "PASS — migration twice, tenant isolation, categorização, conflito, fallback legado, onboarding idempotente.\\n";
