@@ -84,8 +84,9 @@ function uplar_business_profile_store(PDO $pdo, int $userId, array $input): arra
         ? uplar_business_profile_categories($input['categorias_pendentes'] ?? [])
         : [];
     $applyMode = $status === 'concluida' && ($input['aplicar_modo'] ?? false) === true;
-    $applyDelivery = $status !== 'dispensada' && ($input['entrega'] ?? false) === true;
-    $applyPickup = $status !== 'dispensada' && ($input['retirada'] ?? false) === true;
+    $food = ($preset['familia'] ?? '') === 'alimentacao';
+    $applyDelivery = $status !== 'dispensada' && $food && ($input['entrega'] ?? false) === true;
+    $applyPickup = $status !== 'dispensada' && $food && ($input['retirada'] ?? false) === true;
     if ($status === 'concluida' && $applyMode && !uplar_vitrine_experience_schema_disponivel($pdo)) {
         throw new RuntimeException('O modo de vitrine ainda não está disponível no banco.');
     }
@@ -97,6 +98,9 @@ function uplar_business_profile_store(PDO $pdo, int $userId, array $input): arra
         $oldStmt = $pdo->prepare('SELECT perfil_negocio_json FROM empresa_config WHERE user_id = ? FOR UPDATE');
         $oldStmt->execute([$userId]);
         $old = uplar_business_profile_decode($oldStmt->fetchColumn());
+        if (($old['status_configuracao'] ?? '') === 'concluida' && $status !== 'concluida') {
+            throw new InvalidArgumentException('O perfil já foi concluído. Utilize a confirmação de alteração, não a ação de dispensar ou rascunhar.');
+        }
         // Não perder categorias configuradas ao repetir a mesma submissão.
         $profile = [
             'schema_version' => 1,
@@ -104,10 +108,12 @@ function uplar_business_profile_store(PDO $pdo, int $userId, array $input): arra
             'versao_preset' => $preset['versao_preset'] ?? null,
             'status_configuracao' => $status,
             'categorias_pendentes' => $categories,
+            'categorias_definidas' => ($input['categorias_definidas'] ?? false) === true,
             'modo_pendente' => null,
             'preferencias_atendimento_pendentes' => [
                 'entrega' => $applyDelivery, 'retirada' => $applyPickup,
             ],
+            'atendimento_confirmado' => $status === 'concluida' && $food && ($applyDelivery || $applyPickup),
             'configurado_em' => $status === 'concluida'
                 ? ($old['configurado_em'] ?? date('c')) : null,
         ];
