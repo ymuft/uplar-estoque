@@ -405,6 +405,9 @@ button{font-family:inherit;cursor:pointer}
 .category-retry{margin-top:.45rem}
 .val-toggle-wrap{width:100%;font:inherit;color:inherit;text-align:left}
 .val-toggle-wrap:focus-visible{outline:3px solid var(--p);outline-offset:2px}
+.wizard-inline-link{border:0;background:transparent;color:var(--p);font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;min-height:30px}
+.wizard-quick-save{margin:1.1rem 0 .25rem auto;min-height:46px}
+.wizard-quick-save[hidden]{display:none!important}
 .modal[data-business-family="alimentacao"] #productNameField{order:1}
 .modal[data-business-family="alimentacao"] #pCategoriaControl{order:2}
 .modal[data-business-family="alimentacao"] #productDescriptionField{order:3}
@@ -574,9 +577,9 @@ button{font-family:inherit;cursor:pointer}
                         <span class="hint">Como o produto aparecerá no catálogo</span>
                     </div>
                     <div class="fl fw" id="productSkuField">
-                        <label><?= $businessFood ? 'Código / SKU interno *' : 'Código / SKU *' ?></label>
+                        <label for="pCod"><?= $businessFood ? 'Código interno / SKU (gerado se ficar vazio)' : 'Código / SKU *' ?></label>
                         <input id="pCod" placeholder="<?= $businessFood ? 'Ex: LAN-001' : 'Ex: CAM-001' ?>">
-                        <span class="hint">Código único de identificação</span>
+                        <span class="hint">Código único de identificação. <button type="button" id="genSku" class="wizard-inline-link">Gerar código</button></span>
                     </div>
                     <div class="fl fw" id="productDescriptionField">
                         <label><?= $businessFood ? 'Descrição e ingredientes' : 'Descrição' ?></label>
@@ -652,10 +655,11 @@ button{font-family:inherit;cursor:pointer}
                     <summary>Validade e alertas <span style="font-weight:500;color:var(--faint)">Opcional</span></summary>
                     <div class="product-optional-content" id="productValidityContent"></div>
                 </details>
+                <button type="button" id="btnQuickSave" class="btn-next wizard-quick-save" hidden>Salvar produto simples</button>
             </div>
 
             <div class="step-panel" id="s3">
-                <div class="val-toggle-wrap" id="valToggleWrap" onclick="toggleValidade()">
+                <div class="val-toggle-wrap" id="valToggleWrap" role="button" tabindex="0" aria-pressed="false" onclick="toggleValidade()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleValidade();}">
                     <div class="val-check" id="valCheck">
                         <span class="material-symbols-outlined">check</span>
                     </div>
@@ -861,6 +865,23 @@ const BUSINESS_CONTEXT = <?= json_encode([
 const $ = id => document.getElementById(id);
 const esc = v => String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const R = v => 'R$\u00a0'+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+function generateProductSku(){
+    const bytes=new Uint8Array(6);
+    if(window.crypto?.getRandomValues)window.crypto.getRandomValues(bytes);
+    else for(let i=0;i<bytes.length;i++)bytes[i]=Math.floor(Math.random()*256);
+    const suffix=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('').toUpperCase();
+    return (BUSINESS_CONTEXT.familia==='alimentacao'?'ALIM':'PROD')+'-'+suffix;
+}
+$('genSku').addEventListener('click',()=>{
+    $('pCod').value=generateProductSku();
+    wizardFieldsDirty=true;
+});
+function updateQuickSaveVisibility(){
+    const button=$('btnQuickSave');if(!button)return;
+    const simple=!editId&&!customizationEnabled&&!$('sizeYes').classList.contains('on');
+    button.hidden=!(simple&&activeStepId===2);
+}
+$('btnQuickSave').addEventListener('click',()=>saveProduct());
 
 function compactOptionalWizardPanels(){
     const moves=[['s3','productValidityContent'],['s4','productImageContent']];
@@ -1059,6 +1080,7 @@ function setCustomizationEnabled(enabled,{explicit=false}={}){
         buildDots();
         gotoStep(wizardPositionForId(activeStepId));
     }
+    updateQuickSaveVisibility();
 }
 function removeProductComplementsAfterConfirmation(){
     if(!complementsEditor?.groups?.length)return true;
@@ -1188,6 +1210,7 @@ $('sizeYes').addEventListener('click',()=>{
     $('sizeYes').classList.add('on');
     $('sizeNo').classList.remove('on');
     renderSizeEditor();
+    updateQuickSaveVisibility();
 });
 
 $('sizeNo').addEventListener('click',()=>{
@@ -1200,6 +1223,7 @@ $('sizeNo').addEventListener('click',()=>{
     $('sizeNo').classList.add('on');
     $('sizeYes').classList.remove('on');
     renderSizeEditor();
+    updateQuickSaveVisibility();
 });
 
 $('sizeCustom').addEventListener('click',()=>{
@@ -1245,12 +1269,17 @@ function gotoStep(position){
     }
     if(activeStepId===6)buildReview();
     updateComplementsNavigation();
+    updateQuickSaveVisibility();
 }
 
 function validateStep(stepId){
     if(stepId===1){
         if(!$('pNome').value.trim()){toast('Informe o nome do produto','err');return false}
-        if(!$('pCod').value.trim()){toast('Informe o código / SKU','err');return false}
+        if(!$('pCod').value.trim()){
+            if(BUSINESS_CONTEXT.familia==='alimentacao'&&!editId){
+                $('pCod').value=generateProductSku();
+            }else{toast('Informe o código / SKU','err');return false;}
+        }
     }
     if(stepId===2){
         if(!$('pPreco').value||parseFloat($('pPreco').value)<=0){toast('Informe o preço de venda','err');return false}
@@ -1556,8 +1585,8 @@ $('btnNext').addEventListener('click',async()=>{
 });
 
 async function saveProduct(){
-    const btn=$('btnNext');
-    if(btn.disabled)return;
+    const btn=$('btnNext'),quick=$('btnQuickSave');
+    if(btn.disabled||quick?.disabled)return;
     const requiredSteps=customizationEnabled?[1,2,5]:[1,2];
     if(!requiredSteps.every(validateStep))return;
     const existingId=Number(editId);
@@ -1580,6 +1609,7 @@ async function saveProduct(){
     if($('fImg').files[0])fd.append('imagem',$('fImg').files[0]);
 
     btn.disabled=true;
+    if(quick)quick.disabled=true;
     btn.innerHTML='<span class="material-symbols-outlined">hourglass_empty</span>Salvando…';
 
     try{
@@ -1621,6 +1651,7 @@ async function saveProduct(){
         toast(productPersisted?'Produto salvo. '+safeMessage+' Os dados permanecem; tente salvar novamente para concluir.':safeMessage,'err');
     }finally{
         btn.disabled=false;
+        if(quick)quick.disabled=false;
         btn.innerHTML='<span class="material-symbols-outlined">save</span>Salvar';
     }
 }
