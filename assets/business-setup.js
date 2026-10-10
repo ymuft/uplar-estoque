@@ -68,15 +68,24 @@
     if(segment){const sel=choiceRadios.find(el=>el.value===segment);if(sel){sel.checked=true;byId('bs-next').disabled=false;}}
     byId('bs-next').addEventListener('click',async()=>{
         const button=byId('bs-next');busy(button,true);
-        try{await post('draft',{categorias:[],aplicar_modo:false});showConfig();}
+        try{
+            if(profile.status_configuracao!=='concluida'){
+                await post('draft',{categorias:editedCategories,aplicar_modo:false});
+            }
+            showConfig();
+        }
         catch(e){alert(e.message);}
         finally{busy(button,false);}
     });
     byId('bs-back').addEventListener('click',()=>{editedCategories=categoriesFromUI();showStep(1)});
     byId('bs-add-category').addEventListener('click',()=>addCategory(''));
+    if(profile.status_configuracao==='concluida')byId('bs-save-later').textContent='Sair sem aplicar';
     byId('bs-save-later').addEventListener('click',async()=>{
         const button=byId('bs-save-later');busy(button,true);
-        try{await post('draft',values());location.href='estoque.php';}
+        try{
+            if(profile.status_configuracao!=='concluida') await post('draft',values());
+            location.href='estoque.php';
+        }
         catch(e){notify(e.message);busy(button,false);}
     });
     byId('bs-confirm').addEventListener('click',async()=>{
