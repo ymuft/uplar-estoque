@@ -5,6 +5,7 @@ session_start();
 require 'db.php';
 require 'helpers.php';
 require_once __DIR__ . '/includes/vitrine_experience.php';
+require_once __DIR__ . '/includes/business_profile_runtime.php';
 require_once __DIR__ . '/includes/tracking_runtime.php';
 require_once __DIR__ . '/includes/vitrine_featured.php';
 
@@ -29,6 +30,16 @@ $cs->execute([$user_id]);
 $cfg = $cs->fetch(PDO::FETCH_ASSOC) ?: [];
 $experienceMode = uplar_vitrine_experience_mode($cfg['experiencia_json'] ?? null);
 $experiencePrefs = uplar_vitrine_experience_preferences($cfg['experiencia_json'] ?? null);
+// Somente para formulário administrativo ainda não salvo: o modo sugerido
+// não altera a vitrine pública nem publica uma configuração incompleta.
+if (empty($cfg['experiencia_json'])) {
+    $profileChoice = uplar_business_profile_read($pdo, $user_id);
+    $suggestedMode = $profileChoice['modo_pendente'] ?? null;
+    if (in_array($suggestedMode, ['padrao', 'loja', 'cardapio'], true)) {
+        $experienceMode = $suggestedMode;
+        $experiencePrefs['modo'] = $suggestedMode;
+    }
+}
 
 $nome_loja   = ($cfg['nome_loja']   ?? '') ?: $username;
 $descricao   = $cfg['descricao']   ?? '';
