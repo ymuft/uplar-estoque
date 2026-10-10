@@ -33,7 +33,7 @@
     const showConfig=()=>{
         if(!segment||!catalog[segment])return;
         const item=catalog[segment];
-        byId('bs-profile-heading').textContent='Sua '+item.nome.toLowerCase()+' na Uplar';
+        byId('bs-profile-heading').textContent='Configuração para '+item.nome;
         byId('bs-mode-label').textContent={cardapio:'Cardápio',loja:'Loja / e-commerce',padrao:'Padrão'}[item.modo_sugerido]||'Padrão';
         byId('bs-category-list').replaceChildren();
         const initial=categoriesDefined?editedCategories:item.categorias_sugeridas||[];
