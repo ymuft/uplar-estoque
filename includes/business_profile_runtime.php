@@ -80,12 +80,12 @@ function uplar_business_profile_store(PDO $pdo, int $userId, array $input): arra
         throw new InvalidArgumentException('Escolha um segmento válido.');
     }
     $preset = $segment !== null ? uplar_business_profile_get($segment) : null;
-    $categories = $status === 'concluida'
+    $categories = $status !== 'dispensada'
         ? uplar_business_profile_categories($input['categorias_pendentes'] ?? [])
         : [];
     $applyMode = $status === 'concluida' && ($input['aplicar_modo'] ?? false) === true;
-    $applyDelivery = $status === 'concluida' && ($input['entrega'] ?? false) === true;
-    $applyPickup = $status === 'concluida' && ($input['retirada'] ?? false) === true;
+    $applyDelivery = $status !== 'dispensada' && ($input['entrega'] ?? false) === true;
+    $applyPickup = $status !== 'dispensada' && ($input['retirada'] ?? false) === true;
     if ($status === 'concluida' && $applyMode && !uplar_vitrine_experience_schema_disponivel($pdo)) {
         throw new RuntimeException('O modo de vitrine ainda não está disponível no banco.');
     }
