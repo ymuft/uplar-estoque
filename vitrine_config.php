@@ -1369,6 +1369,13 @@ const experienceAdmin=new VitrineExperienceAdmin($('experienceCategories'),<?= j
     if(!produtosCarregados)throw Error('Não foi possível carregar seus produtos. Tente novamente.');
     return todosOsProdutos;
 });
+window.addEventListener('uplar-categorias-ativadas',()=>{
+    // O editor legado permanece montado para compatibilidade, mas não pode
+    // reverter a fonte canônica ao salvar outra preferência neste mesmo tab.
+    experienceAdmin.prefs.fonte_categorias='canonico';
+    const oldEditor=document.getElementById('legacyCategoryEditor');
+    if(oldEditor)oldEditor.hidden=true;
+});
 let experienceSettingsDirty=false;
 document.querySelector('.store-settings-card')?.addEventListener('input',()=>experienceSettingsDirty=true);
 document.querySelector('.store-settings-card')?.addEventListener('change',()=>experienceSettingsDirty=true);
