@@ -118,7 +118,7 @@ root.addEventListener('click',async e=>{
       const r=await fetch('catalogo_categorias_api.php?acao=auditoria',{credentials:'same-origin'});response=await r.json();if(!r.ok||!response.ok)throw Error(response.error||'Falha na auditoria.');audit=response.relatorio;
    }
    else if(action==='import'){response=await post('importar_legado',{confirmar_conflitos:audit?.conflitos?'1':'0'});audit=null;}
-   else if(action==='activate'){response=await post('ativar_canonico',{confirmar:'1',confirmar_conflitos:audit?.conflitos?'1':'0'});root.dataset.source='canonico';audit=null;}
+   else if(action==='activate'){response=await post('ativar_canonico',{confirmar:'1',confirmar_conflitos:audit?.conflitos?'1':'0'});root.dataset.source='canonico';audit=null;window.dispatchEvent(new CustomEvent('uplar-categorias-ativadas'));}
    else return;
    editing=0;deleting=0;await reload();render();notice(action==='audit'?'Auditoria concluída.': 'Alterações salvas.');
  }catch(err){if(err.report)audit=err.report;render();notice(err.message,true);}finally{finished();}
