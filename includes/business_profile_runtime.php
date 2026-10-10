@@ -6,6 +6,7 @@
 declare(strict_types=1);
 require_once __DIR__ . '/business_profiles.php';
 require_once __DIR__ . '/vitrine_experience.php';
+require_once __DIR__ . '/catalog_categories.php';
 
 function uplar_business_profile_schema_available(PDO $pdo): bool
 {
@@ -117,6 +118,13 @@ function uplar_business_profile_store(PDO $pdo, int $userId, array $input): arra
             'configurado_em' => $status === 'concluida'
                 ? ($old['configurado_em'] ?? date('c')) : null,
         ];
+        // Quando M3 estiver presente, categorias confirmadas no onboarding
+        // são criadas uma única vez no catálogo canônico; nunca associa produtos
+        // nem substitui a organização de vitrines antigas.
+        if ($status === 'concluida' && $profile['categorias_definidas'] && uplar_catalogo_schema_ready($pdo)) {
+            foreach ($categories as $name) uplar_catalogo_ensure($pdo, $userId, $name);
+            $profile['categorias_aplicadas_em'] = date('c');
+        }
         if ($applyMode) {
             $mode = $preset['modo_sugerido'];
             $cfg = $pdo->prepare('SELECT experiencia_json FROM vitrine_config WHERE user_id = ? LIMIT 1 FOR UPDATE');
