@@ -40,6 +40,13 @@ if (empty($cfg['experiencia_json'])) {
         $experienceMode = $suggestedMode;
         $experiencePrefs['modo'] = $suggestedMode;
     }
+    if (!empty($businessProfileForVitrine['atendimento_confirmado'])) {
+        $pendingService = $businessProfileForVitrine['preferencias_atendimento_pendentes'] ?? [];
+        if (is_array($pendingService)) {
+            $experiencePrefs['entrega_habilitada'] = !empty($pendingService['entrega']);
+            $experiencePrefs['retirada_habilitada'] = !empty($pendingService['retirada']);
+        }
+    }
 }
 
 $nome_loja   = ($cfg['nome_loja']   ?? '') ?: $username;
