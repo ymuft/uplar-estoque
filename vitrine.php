@@ -578,9 +578,9 @@ img{display:block;max-width:100%}
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4zm2.5 2.1h-15V5h15v14.1zm0-16.1h-15C3.1 3 2 4.1 2 5.25V20c0 1.1.9 2 2 2h15c1.1 0 2-.9 2-2V5.25C21 4.1 19.9 3 18.5 3z"/></svg>
             Pedidos
         </button>
-        <button class="bnav-a" onclick="openCart()">
+        <button class="bnav-a cart-nav" id="btnNavCart" onclick="openCart()" aria-label="Abrir carrinho">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6h-2c0-2.76-2.24-5-5-5S7 3.24 7 6H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-7-3c1.66 0 3 1.34 3 3H9c0-1.66 1.34-3 3-3zm0 10c-2.21 0-4-1.79-4-4h2c0 1.1.9 2 2 2s2-.9 2-2h2c0 2.21-1.79 4-4 4z"/></svg>
-            Loja
+            <span class="cart-nav-copy"><span id="cartNavLabel">Meu carrinho</span><small id="cartNavMeta" hidden></small></span>
         </button>
     </div>
 </nav>
@@ -826,10 +826,16 @@ function renderProdutos(){
     let f=[...produtos];
     const configuredCategories=(EXPERIENCE.categorias||[]).filter(c=>Array.isArray(c.produto_ids)&&c.produto_ids.length);
     const selectedCategory=configuredCategories.find(c=>String(c.id)===String(catAtual));
+    const categoryProductIds=new Map(configuredCategories.map(category=>[String(category.id),new Set(category.produto_ids.map(Number))]));
+    const categoryByProduct=new Map();
+    for(const category of configuredCategories){
+        const ids=categoryProductIds.get(String(category.id));
+        for(const id of ids)if(!categoryByProduct.has(id))categoryByProduct.set(id,category);
+    }
     const legacyCategory=catAtual!=='todos'&&!selectedCategory&&document.body.dataset.experience==='padrao';
-    if(selectedCategory){const ids=new Set((selectedCategory.produto_ids||[]).map(Number));f=f.filter(p=>ids.has(Number(p.id)));}
+    if(selectedCategory){const ids=categoryProductIds.get(String(selectedCategory.id))||new Set();f=f.filter(p=>ids.has(Number(p.id)));}
     else if(legacyCategory)f=f.filter(p=>String(p.nome||'').toUpperCase().startsWith(String(catAtual).toUpperCase()));
-    if(buscaTxt)f=f.filter(p=>{const category=configuredCategories.find(c=>c.produto_ids.map(Number).includes(Number(p.id)));return `${p.nome||''} ${p.descricao||''} ${category?.nome||''}`.toLowerCase().includes(buscaTxt);});
+    if(buscaTxt)f=f.filter(p=>`${p.nome||''} ${p.descricao||''} ${categoryByProduct.get(Number(p.id))?.nome||''}`.toLowerCase().includes(buscaTxt));
     if(EXPERIENCE.indisponiveis==='ocultar')f=f.filter(p=>productStock(p)>0);
     if($('onlyAvailable')?.checked)f=f.filter(p=>productStock(p)>0);
     if($('hasSize')?.checked)f=f.filter(p=>p.usa_tamanhos===true||(Array.isArray(p.tamanhos)&&p.tamanhos.length>0));
@@ -843,13 +849,22 @@ function renderProdutos(){
     $('secTitle').textContent=catAtual==='todos'?(configuredCategories.length||document.body.dataset.experience==='padrao'&&produtos.length?'Todos os produtos':'Produtos'):(selectedCategory?.nome||catAtual.charAt(0)+catAtual.slice(1).toLowerCase());
     if(!f.length){featuredSection.hidden=true;catalogHead.hidden=false;list.innerHTML='<div class="empty-state"><p>Nenhum produto encontrado.</p></div>';return;}
     if(document.body.dataset.experience==='cardapio'&&configuredCategories.length){
-        featuredSection.hidden=true;catalogHead.hidden=false;
-        const groups=configuredCategories.map(category=>({id:category.id,nome:category.nome,produtos:f.filter(p=>category.produto_ids.map(Number).includes(Number(p.id)))})).filter(group=>group.produtos.length);
+        const showMenuHighlights=catAtual==='todos';
+        const menuHighlights=showMenuHighlights?destaques:[];
+        const highlightedIds=new Set(menuHighlights.map(p=>Number(p.id)));
+        featuredSection.hidden=!menuHighlights.length;
+        featuredList.innerHTML=menuHighlights.map(p=>cardProduto(p,true)).join('');
+        const groups=configuredCategories.map(category=>({
+            id:category.id,
+            nome:category.nome,
+            produtos:f.filter(p=>(categoryProductIds.get(String(category.id))||new Set()).has(Number(p.id))&&!highlightedIds.has(Number(p.id)))
+        })).filter(group=>group.produtos.length);
         const assigned=new Set(groups.flatMap(group=>group.produtos.map(p=>Number(p.id))));
-        const uncategorized=f.filter(p=>!assigned.has(Number(p.id)));
-        if(uncategorized.length)groups.push({id:'outros',nome:'Outros produtos não atribuídos',produtos:uncategorized});
+        const uncategorized=f.filter(p=>!assigned.has(Number(p.id))&&!highlightedIds.has(Number(p.id)));
+        if(uncategorized.length)groups.push({id:'outros',nome:'Sem categoria',produtos:uncategorized});
+        catalogHead.hidden=!groups.length;
         list.innerHTML=groups.map(group=>`<section class="menu-category" id="menu-category-${esc(group.id)}"><h2>${esc(group.nome)}</h2><div class="menu-category-products">${group.produtos.map(p=>cardProduto(p)).join('')}</div></section>`).join('');
-        featuredList.innerHTML='';return;
+        return;
     }
     featuredSection.hidden=!destaques.length;catalogHead.hidden=!comuns.length;
     featuredList.innerHTML=destaques.map(p=>cardProduto(p,true)).join('');
@@ -1086,6 +1101,25 @@ async function addFromSheet(pid){
 let cartCount=0,cartItemsSnapshot=[],cartSnapshotTotal=0,cartSnapshotFee=0;
 const CART_STORAGE_KEY=`uplar:vitrine:${SLUG}:cart:v1`;
 
+function updateCartNavigation(){
+    const cardapio=document.body.dataset.experience==='cardapio';
+    const label=cardapio?'Meu pedido':document.body.dataset.experience==='loja'?'Meu carrinho':'Carrinho';
+    const title=$('cartTitle'),navLabel=$('cartNavLabel'),navMeta=$('cartNavMeta'),navButton=$('btnNavCart');
+    if(title)title.textContent=label;
+    if(navLabel)navLabel.textContent=label;
+    if(navMeta){
+        const hasItems=Number(cartCount)>0;
+        const itemLabel=Number(cartCount)===1?'item':'itens';
+        const total=Number(cartSnapshotTotal)+(typeof tipoEnt!=='undefined'&&tipoEnt==='entrega'?Number(cartSnapshotFee):0);
+        navMeta.textContent=hasItems?`${cartCount} ${itemLabel} · ${R(total)}`:'';
+        navMeta.hidden=!hasItems;
+    }
+    if(navButton){
+        const count=Number(cartCount)||0;
+        navButton.setAttribute('aria-label',count?`${label}, ${count} ${count===1?'item':'itens'}`:label);
+    }
+}
+
 function readPersistentCart(){
     try{
         const raw=localStorage.getItem(CART_STORAGE_KEY);
@@ -1159,12 +1193,16 @@ async function updateCartCount(){
         if(j.ok){
             savePersistentCart(j.itens);
             cartCount=j.count||0;
+            cartSnapshotTotal=Number(j.total)||0;
+            cartSnapshotFee=Number(j.valor_frete)||0;
             const b=$('cartBadge');b.textContent=cartCount;b.classList.toggle('on',cartCount>0);
+            updateCartNavigation();
         }
     }catch{}
 }
 
 function openCart(){
+    updateCartNavigation();
     storeTrack('cart_view');
     $('cartBg').classList.add('on');
     $('cartSheet').style.display='flex';
@@ -1180,7 +1218,7 @@ async function loadCartSheet(){
         const r=await fetch(`vitrine_api.php?acao=carrinho_get&slug=${encodeURIComponent(SLUG)}`);
         const j=await r.json();
         if(!j.ok) throw new Error();
-        const itens=j.itens||[];cartItemsSnapshot=itens.map(item=>({...item}));cartSnapshotTotal=Number(j.total)||0;cartSnapshotFee=Number(j.valor_frete)||0;
+        const itens=j.itens||[];cartItemsSnapshot=itens.map(item=>({...item}));cartSnapshotTotal=Number(j.total)||0;cartSnapshotFee=Number(j.valor_frete)||0;cartCount=Number(j.count)||itens.reduce((sum,item)=>sum+Number(item.qtd_carrinho||0),0);updateCartNavigation();
         savePersistentCart(itens);
         if(!itens.length){
             $('cartBody').innerHTML='<div class="empty-state"><svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96C5 16.1 6.1 17 7 17h11v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63H18c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0022.46 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg><p>Seu carrinho está vazio.</p></div>';
@@ -1241,6 +1279,7 @@ let tipoEnt=EXPERIENCE.retirada_habilitada!==false?'retirada':'entrega',delivery
 function setTipo(tipo){
     if(tipo==='entrega'&&EXPERIENCE.entrega_habilitada===false)return;if(tipo==='retirada'&&EXPERIENCE.retirada_habilitada===false)return;
     tipoEnt=tipo;
+    updateCartNavigation();
     const retTab=document.getElementById('tabRet'),entTab=document.getElementById('tabEnt');if(retTab)retTab.classList.toggle('on',tipo==='retirada');if(entTab)entTab.classList.toggle('on',tipo==='entrega');
     const info=document.getElementById('tipoInfo');
     if(!info)return;
@@ -1397,3 +1436,4 @@ window.addEventListener('pagehide',()=>{
 </script>
 </body>
 </html>
+

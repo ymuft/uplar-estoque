@@ -394,7 +394,21 @@ button{font-family:inherit;cursor:pointer}
 @media(max-width:600px){.bnav{display:block}.main{padding:.9rem .9rem calc(68px + env(safe-area-inset-bottom))}.top{flex-direction:column;align-items:flex-start;margin-bottom:1rem}.searchbox{min-width:0;width:100%}.greeting{font-size:1.2rem}.pills{gap:.4rem}.pill{padding:.46rem .8rem;font-size:.76rem}.kpis{grid-template-columns:1fr 1fr;gap:.6rem}.kpi-val{font-size:1.35rem}.pg{grid-template-columns:1fr 1fr}.mbox{width:96%;max-height:96vh}.fg{grid-template-columns:1fr}.size-stock-dialog{width:calc(100vw - 1rem);max-height:calc(100vh - 1rem);border-radius:15px}.size-stock-head{padding:1rem}.size-stock-body{padding:.85rem 1rem}.size-stock-footer{padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}.size-stock-change{grid-template-columns:1fr 1fr}.size-stock-change span:last-child{grid-column:1/-1;text-align:left}.product-action-popover{min-width:170px}}
 @media(max-width:380px){.kpis{grid-template-columns:1fr}.pg{grid-template-columns:1fr}}
 .customization-choice{min-height:44px;cursor:pointer;gap:.45rem}.customization-choice.on{background:var(--p-dim);border-color:var(--p);color:var(--p)}.customization-choice input{accent-color:var(--p)}
-#pCategoriaControl[hidden],#pNovaCategoriaWrap[hidden]{display:none!important}
+#pCategoriaControl[hidden],#pNovaCategoriaWrap[hidden],#categoryRetry[hidden],#categoryLoadStatus[hidden]{display:none!important}
+.product-optional-control{margin-top:1rem;border:1px solid var(--border);border-radius:11px;background:var(--card)}
+.product-optional-control>summary{display:flex;align-items:center;justify-content:space-between;gap:.7rem;min-height:48px;padding:.75rem .9rem;color:var(--ink);font-size:.78rem;font-weight:700;cursor:pointer;list-style:none}
+.product-optional-control>summary::-webkit-details-marker{display:none}
+.product-optional-control>summary::after{content:'+';font-size:1.05rem;color:var(--p)}
+.product-optional-control[open]>summary::after{content:'−'}
+.product-optional-content{padding:0 .85rem .85rem}
+.category-load-status{margin-top:.5rem;color:var(--muted);font-size:.72rem;line-height:1.45}
+.category-retry{margin-top:.45rem}
+.val-toggle-wrap{width:100%;font:inherit;color:inherit;text-align:left}
+.val-toggle-wrap:focus-visible{outline:3px solid var(--p);outline-offset:2px}
+.modal[data-business-family="alimentacao"] #productNameField{order:1}
+.modal[data-business-family="alimentacao"] #pCategoriaControl{order:2}
+.modal[data-business-family="alimentacao"] #productDescriptionField{order:3}
+.modal[data-business-family="alimentacao"] #productSkuField{order:4}
 </style>
 <link rel="stylesheet" href="assets/app-theme.css?v=20260819.1">
 <script src="assets/app-theme.js?v=20260819.1"></script>
@@ -542,7 +556,7 @@ button{font-family:inherit;cursor:pointer}
     </div>
 </nav>
 
-<div class="modal" id="modal">
+<div class="modal" id="modal" data-business-family="<?= htmlspecialchars((string)($businessPreset['familia'] ?? 'generico'), ENT_QUOTES, 'UTF-8') ?>">
     <div class="mbox">
         <div class="mstep-head">
             <button class="mstep-close" id="mclose"><span class="material-symbols-outlined">close</span></button>
@@ -554,18 +568,18 @@ button{font-family:inherit;cursor:pointer}
         <div class="mstep-body">
             <div class="step-panel on" id="s1">
                 <div class="fg">
-                    <div class="fl fw">
+                    <div class="fl fw" id="productNameField">
                         <label>Nome do produto *</label>
                         <input id="pNome" placeholder="<?= $businessFood ? 'Ex: X-Bacon Artesanal' : 'Ex: Camisa esportiva' ?>">
                         <span class="hint">Como o produto aparecerá no catálogo</span>
                     </div>
-                    <div class="fl fw">
-                        <label>Código / SKU *</label>
+                    <div class="fl fw" id="productSkuField">
+                        <label><?= $businessFood ? 'Código / SKU interno *' : 'Código / SKU *' ?></label>
                         <input id="pCod" placeholder="<?= $businessFood ? 'Ex: LAN-001' : 'Ex: CAM-001' ?>">
                         <span class="hint">Código único de identificação</span>
                     </div>
-                    <div class="fl fw">
-                        <label>Descrição</label>
+                    <div class="fl fw" id="productDescriptionField">
+                        <label><?= $businessFood ? 'Descrição e ingredientes' : 'Descrição' ?></label>
                         <textarea id="pDesc" rows="3" placeholder="<?= $businessFood ? 'Descreva ingredientes, preparo e o que acompanha o produto…' : 'Detalhe material, modelo, cores ou outras características…' ?>"></textarea>
                     </div>
                     <div class="fl fw" id="pCategoriaControl" hidden>
@@ -580,8 +594,14 @@ button{font-family:inherit;cursor:pointer}
                             <button class="pill pill-outline" id="pCancelarCategoria" type="button">Cancelar</button>
                         </div>
                         <span class="hint">A mesma categoria será usada na vitrine, sem classificar novamente.</span>
+                        <div id="categoryLoadStatus" class="category-load-status" role="status" aria-live="polite" hidden></div>
+                        <button class="pill pill-outline category-retry" type="button" id="categoryRetry" hidden>Tentar carregar categorias</button>
                     </div>
                 </div>
+                <details class="product-optional-control" id="productImageDetails">
+                    <summary>Adicionar foto ao catálogo <span style="font-weight:500;color:var(--faint)">Opcional</span></summary>
+                    <div class="product-optional-content" id="productImageContent"></div>
+                </details>
             </div>
 
             <div class="step-panel" id="s2">
@@ -628,6 +648,10 @@ button{font-family:inherit;cursor:pointer}
                         <label class="pill pill-outline customization-choice" for="customizationYes"><input id="customizationYes" name="customization" type="radio" value="yes"> Sim</label>
                     </div>
                 </fieldset>
+                <details class="product-optional-control" id="productValidityDetails">
+                    <summary>Validade e alertas <span style="font-weight:500;color:var(--faint)">Opcional</span></summary>
+                    <div class="product-optional-content" id="productValidityContent"></div>
+                </details>
             </div>
 
             <div class="step-panel" id="s3">
@@ -774,23 +798,41 @@ button{font-family:inherit;cursor:pointer}
 
 <script>
 const CSRF = <?= json_encode(get_csrf_token()) ?>;
-let categoriasDisponiveis=[],categoriaSelecionada=null;
+let categoriasDisponiveis=[],categoriaSelecionada=null,categoriasProntas=false,categoriasRequest=null;
 function renderCategoriasProduto(){
     const select=document.getElementById('pCategoria');if(!select)return;
     select.replaceChildren(new Option('Sem categoria',''));
     categoriasDisponiveis.forEach(c=>select.add(new Option(c.nome,String(c.id))));
     select.value=categoriaSelecionada===null?'':String(categoriaSelecionada);
+    select.disabled=false;
+    categoriasProntas=true;
     document.getElementById('pCategoriaControl').hidden=false;
+    document.getElementById('categoryLoadStatus').hidden=true;
+    document.getElementById('categoryRetry').hidden=true;
 }
 async function carregarCategoriasProduto(){
-    try{
-        const r=await fetch('catalogo_categorias_api.php?acao=listar',{credentials:'same-origin'});
-        const j=await r.json();if(!r.ok||!j.ok)return;
-        categoriasDisponiveis=Array.isArray(j.categorias)?j.categorias:[];renderCategoriasProduto();
-    }catch(error){console.warn('[Categorias] Erro ao carregar:',error);}
+    if(categoriasProntas)return true;
+    if(categoriasRequest)return categoriasRequest;
+    categoriasRequest=(async()=>{
+        try{
+            const r=await fetch('catalogo_categorias_api.php?acao=listar',{credentials:'same-origin'});
+            const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'Não foi possível carregar as categorias.');
+            categoriasDisponiveis=Array.isArray(j.categorias)?j.categorias:[];renderCategoriasProduto();return true;
+        }catch(error){
+            console.warn('[Categorias] Erro ao carregar:',error);
+            const control=document.getElementById('pCategoriaControl');
+            control.hidden=false;document.getElementById('pCategoria').disabled=true;
+            const status=document.getElementById('categoryLoadStatus');
+            status.textContent='As categorias não carregaram. Você pode tentar novamente; os demais dados do produto serão preservados.';status.hidden=false;
+            document.getElementById('categoryRetry').hidden=false;
+            return false;
+        }finally{categoriasRequest=null;}
+    })();
+    return categoriasRequest;
 }
 document.addEventListener('DOMContentLoaded',carregarCategoriasProduto);
 document.addEventListener('click',async event=>{
+    if(event.target.closest('#categoryRetry')){await carregarCategoriasProduto();return;}
     if(event.target.closest('#btnCriarCategoria')){document.getElementById('pNovaCategoriaWrap').hidden=false;document.getElementById('pNovaCategoria').focus();}
     if(event.target.closest('#pCancelarCategoria')){document.getElementById('pNovaCategoriaWrap').hidden=true;document.getElementById('pNovaCategoria').value='';}
     if(event.target.closest('#pSalvarCategoria')){
@@ -819,6 +861,17 @@ const BUSINESS_CONTEXT = <?= json_encode([
 const $ = id => document.getElementById(id);
 const esc = v => String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const R = v => 'R$\u00a0'+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+
+function compactOptionalWizardPanels(){
+    const moves=[['s3','productValidityContent'],['s4','productImageContent']];
+    for(const [sourceId,targetId] of moves){
+        const source=$(sourceId),target=$(targetId);
+        if(!source||!target)continue;
+        while(source.firstChild)target.appendChild(source.firstChild);
+        source.remove();
+    }
+}
+compactOptionalWizardPanels();
 
 function diasParaVencer(dataStr) {
     if (!dataStr) return null;
@@ -939,6 +992,7 @@ function toggleValidade(){
 
     check.classList.toggle('on', temValidade);
     wrap.classList.toggle('active', temValidade);
+    wrap.setAttribute('aria-pressed',String(temValidade));
     section.classList.toggle('on', temValidade);
     noWrap.style.display = temValidade ? 'none' : 'block';
 
@@ -980,11 +1034,9 @@ function showPrev(f){
 }
 
 const STEPS=[
-    {id:1,title:'Informações básicas',sub:'Nome, código e descrição do produto'},
-    {id:2,title:'Preço e estoque',sub:'Defina o valor de venda e quantidade inicial'},
+    {id:1,title:BUSINESS_CONTEXT.familia==='alimentacao'?'Produto e cardápio':'Informações do produto',sub:BUSINESS_CONTEXT.familia==='alimentacao'?'Informe nome, categoria e o que acompanha o produto.':'Informe nome, identificação e detalhes do produto.'},
+    {id:2,title:'Preço e disponibilidade',sub:BUSINESS_CONTEXT.familia==='alimentacao'?'Defina o preço, os tamanhos e a quantidade disponível.':'Defina o preço, os tamanhos e o estoque.'},
     {id:5,title:'Personalização do produto',sub:'Organize e reutilize as escolhas do cliente'},
-    {id:3,title:'Validade',sub:'Informe se o produto possui data de vencimento'},
-    {id:4,title:'Foto do produto',sub:'Adicione uma imagem para o catálogo'},
     {id:6,title:'Confirmar e salvar',sub:'Revise os dados antes de salvar'},
 ];
 let curStep=1,activeStepId=1,editId=null;
@@ -993,7 +1045,7 @@ let complementsEditor=null;
 let customizationEnabled=false,customizationChoiceExplicit=false,customizationDisableConfirmed=false;
 let wizardBaseline='',skipWizardLeaveWarning=false,wizardFieldsDirty=false;
 
-function wizardSteps(){return customizationEnabled?STEPS:STEPS.filter(step=>step.id!==5);}
+function wizardSteps(){return STEPS.filter(step=>step.id!==5||customizationEnabled);}
 function wizardPositionForId(id){const position=wizardSteps().findIndex(step=>step.id===id);return position<0?1:position+1;}
 function activeWizardStep(){return wizardSteps()[curStep-1]||wizardSteps()[0];}
 function setCustomizationEnabled(enabled,{explicit=false}={}){
@@ -1193,9 +1245,7 @@ function validateStep(stepId){
     if(stepId===2){
         if(!$('pPreco').value||parseFloat($('pPreco').value)<=0){toast('Informe o preço de venda','err');return false}
         if($('sizeYes').classList.contains('on')&&!sizeDraft.length){toast('Selecione pelo menos um tamanho','err');return false}
-    }
-    if(stepId===3 && temValidade){
-        if(!$('pValidade').value){toast('Informe a data de validade','err');return false}
+        if(temValidade&&!$('pValidade').value){toast('Informe a data de validade','err');return false}
     }
     if(stepId===5 && customizationEnabled&&(!complementsEditor || !complementsEditor.validate())){
         toast(complementsEditor?.ready?'Conclua ou cancele o opcional em edição para avançar.':'Aguarde o carregamento dos opcionais.','err');return false;
@@ -1224,7 +1274,7 @@ function buildReview(){
             <div class="review-row"><span class="rr-l">Nome</span><span class="rr-v">${esc($('pNome').value||'—')}</span></div>
             <div class="review-row"><span class="rr-l">Código</span><span class="rr-v">${esc($('pCod').value||'—')}</span></div>
             <div class="review-row"><span class="rr-l">Descrição</span><span class="rr-v" style="max-width:60%;text-align:right;font-size:.78rem">${esc($('pDesc').value||'—')}</span></div>
-             ${!$('pCategoriaControl').hidden?'<div class="review-row"><span class="rr-l">Categoria</span><span class="rr-v">'+esc($('pCategoria').selectedOptions[0]?.textContent||'Sem categoria')+'</span></div>':''}
+             ${categoriasProntas?'<div class="review-row"><span class="rr-l">Categoria</span><span class="rr-v">'+esc($('pCategoria').selectedOptions[0]?.textContent||'Sem categoria')+'</span></div>':''}
         </div>
         <div class="review-card">
             <div class="review-row"><span class="rr-l">Preço de venda</span><span class="rr-v" style="color:var(--p)">${R($('pPreco').value)}</span></div>
@@ -1304,8 +1354,11 @@ function openM(p=null){
     $('fImg').value='';
 
     temValidade = !!(p?.validade);
+    $('productValidityDetails').open=temValidade;
+    $('productImageDetails').open=Boolean(p?.imagem)||(BUSINESS_CONTEXT.prioridades_cadastro||[]).includes('imagens');
     $('valCheck').classList.toggle('on', temValidade);
     $('valToggleWrap').classList.toggle('active', temValidade);
+    $('valToggleWrap').setAttribute('aria-pressed',String(temValidade));
     $('valDateSection').classList.toggle('on', temValidade);
     $('valNenhumaTxt').style.display = temValidade ? 'none' : 'block';
     $('pValidade').value = p?.validade ?? '';
@@ -1493,7 +1546,7 @@ $('btnNext').addEventListener('click',async()=>{
 async function saveProduct(){
     const btn=$('btnNext');
     if(btn.disabled)return;
-    const requiredSteps=customizationEnabled?[1,2,3,5]:[1,2,3];
+    const requiredSteps=customizationEnabled?[1,2,5]:[1,2];
     if(!requiredSteps.every(validateStep))return;
     const existingId=Number(editId);
     const wasEditing=Number.isInteger(existingId)&&existingId>0;
@@ -1509,7 +1562,7 @@ async function saveProduct(){
     fd.append('preco_custo',$('pCusto').value.trim() || '0');
     fd.append('quantidade',sizeDraft.length?String(sizeDraft.reduce((n,s)=>n+(Number(s.quantidade)||0),0)):$('pQtd').value.trim());
     fd.append('descricao',$('pDesc').value.trim());
-    if(!$('pCategoriaControl').hidden)fd.append('categoria_id',$('pCategoria').value);
+    if(categoriasProntas)fd.append('categoria_id',$('pCategoria').value);
     fd.append('validade', temValidade ? $('pValidade').value : '');
     fd.append('csrf_token',CSRF);
     if($('fImg').files[0])fd.append('imagem',$('fImg').files[0]);
@@ -1544,12 +1597,16 @@ async function saveProduct(){
             toast(wasEditing?'Produto atualizado!':'Produto cadastrado!');
             await loadAll();
         } else {
-            toast(j.error||'Erro ao salvar','err');
+            toast(j.error||'Não foi possível salvar o produto. Revise os campos e tente novamente.','err');
         }
     }catch(e){
         console.error('[Produtos] Erro ao salvar produto:',e);
         if(e.status===409&&customizationEnabled)gotoStep(wizardPositionForId(5));
-        toast(productPersisted?'Produto salvo. '+(e?.message||'Erro ao salvar adicionais ou tamanhos')+' Tente salvar novamente para concluir.':(e?.message||'Erro de conexão'),'err');
+        const rawMessage=String(e?.message||'');
+        const safeMessage=/failed to fetch|networkerror|load failed|unexpected token|json|http 5\d\d|500/i.test(rawMessage)
+            ?'O servidor não conseguiu concluir o salvamento. Verifique a conexão e tente novamente.'
+            :(rawMessage||'Não foi possível concluir o salvamento. Tente novamente.');
+        toast(productPersisted?'Produto salvo. '+safeMessage+' Os dados permanecem; tente salvar novamente para concluir.':safeMessage,'err');
     }finally{
         btn.disabled=false;
         btn.innerHTML='<span class="material-symbols-outlined">save</span>Salvar';
@@ -1933,3 +1990,4 @@ window.onload=loadAll;
 </script>
 </body>
 </html>
+
