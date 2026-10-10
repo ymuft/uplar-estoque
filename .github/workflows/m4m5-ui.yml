@@ -1,0 +1,39 @@
+name: Validacao M4 M5 - Cadastro e Vitrine
+on:
+  pull_request:
+    paths:
+      - 'produtos.php'
+      - 'vitrine.php'
+      - 'assets/vitrine-experience.css'
+      - 'assets/storefront-menu.js'
+      - 'assets/product-complements.js'
+      - 'tests/storefront-menu.test.js'
+      - 'tests/product-wizard-regression.test.js'
+      - 'tests/check-inline-php-js.php'
+      - '.github/workflows/m4m5-ui.yml'
+  workflow_dispatch:
+jobs:
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, pdo_mysql
+          coverage: none
+      - name: PHP lint
+        run: |
+          php -l produtos.php
+          php -l vitrine.php
+          php -l tests/check-inline-php-js.php
+      - name: JavaScript module tests
+        run: |
+          node --check assets/storefront-menu.js
+          node --check assets/product-complements.js
+          node --test tests/storefront-menu.test.js tests/product-wizard-regression.test.js
+      - name: PHP-template inline JS parser check
+        run: |
+          php tests/check-inline-php-js.php
+          node --check /tmp/uplar-produtos-inline.js
+          node --check /tmp/uplar-vitrine-inline.js

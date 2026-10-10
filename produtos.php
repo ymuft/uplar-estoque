@@ -394,7 +394,24 @@ button{font-family:inherit;cursor:pointer}
 @media(max-width:600px){.bnav{display:block}.main{padding:.9rem .9rem calc(68px + env(safe-area-inset-bottom))}.top{flex-direction:column;align-items:flex-start;margin-bottom:1rem}.searchbox{min-width:0;width:100%}.greeting{font-size:1.2rem}.pills{gap:.4rem}.pill{padding:.46rem .8rem;font-size:.76rem}.kpis{grid-template-columns:1fr 1fr;gap:.6rem}.kpi-val{font-size:1.35rem}.pg{grid-template-columns:1fr 1fr}.mbox{width:96%;max-height:96vh}.fg{grid-template-columns:1fr}.size-stock-dialog{width:calc(100vw - 1rem);max-height:calc(100vh - 1rem);border-radius:15px}.size-stock-head{padding:1rem}.size-stock-body{padding:.85rem 1rem}.size-stock-footer{padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}.size-stock-change{grid-template-columns:1fr 1fr}.size-stock-change span:last-child{grid-column:1/-1;text-align:left}.product-action-popover{min-width:170px}}
 @media(max-width:380px){.kpis{grid-template-columns:1fr}.pg{grid-template-columns:1fr}}
 .customization-choice{min-height:44px;cursor:pointer;gap:.45rem}.customization-choice.on{background:var(--p-dim);border-color:var(--p);color:var(--p)}.customization-choice input{accent-color:var(--p)}
-#pCategoriaControl[hidden],#pNovaCategoriaWrap[hidden]{display:none!important}
+#pCategoriaControl[hidden],#pNovaCategoriaWrap[hidden],#categoryRetry[hidden],#categoryLoadStatus[hidden]{display:none!important}
+.product-optional-control{margin-top:1rem;border:1px solid var(--border);border-radius:11px;background:var(--card)}
+.product-optional-control>summary{display:flex;align-items:center;justify-content:space-between;gap:.7rem;min-height:48px;padding:.75rem .9rem;color:var(--ink);font-size:.78rem;font-weight:700;cursor:pointer;list-style:none}
+.product-optional-control>summary::-webkit-details-marker{display:none}
+.product-optional-control>summary::after{content:'+';font-size:1.05rem;color:var(--p)}
+.product-optional-control[open]>summary::after{content:'−'}
+.product-optional-content{padding:0 .85rem .85rem}
+.category-load-status{margin-top:.5rem;color:var(--muted);font-size:.72rem;line-height:1.45}
+.category-retry{margin-top:.45rem}
+.val-toggle-wrap{width:100%;font:inherit;color:inherit;text-align:left}
+.val-toggle-wrap:focus-visible{outline:3px solid var(--p);outline-offset:2px}
+.wizard-inline-link{border:0;background:transparent;color:var(--p);font:inherit;font-weight:700;text-decoration:underline;cursor:pointer;min-height:30px}
+.wizard-quick-save{margin:1.1rem 0 .25rem auto;min-height:46px}
+.wizard-quick-save[hidden]{display:none!important}
+.modal[data-business-family="alimentacao"] #productNameField{order:1}
+.modal[data-business-family="alimentacao"] #pCategoriaControl{order:2}
+.modal[data-business-family="alimentacao"] #productDescriptionField{order:3}
+.modal[data-business-family="alimentacao"] #productSkuField{order:4}
 </style>
 <link rel="stylesheet" href="assets/app-theme.css?v=20260819.1">
 <script src="assets/app-theme.js?v=20260819.1"></script>
@@ -542,7 +559,7 @@ button{font-family:inherit;cursor:pointer}
     </div>
 </nav>
 
-<div class="modal" id="modal">
+<div class="modal" id="modal" data-business-family="<?= htmlspecialchars((string)($businessPreset['familia'] ?? 'generico'), ENT_QUOTES, 'UTF-8') ?>">
     <div class="mbox">
         <div class="mstep-head">
             <button class="mstep-close" id="mclose"><span class="material-symbols-outlined">close</span></button>
@@ -554,18 +571,18 @@ button{font-family:inherit;cursor:pointer}
         <div class="mstep-body">
             <div class="step-panel on" id="s1">
                 <div class="fg">
-                    <div class="fl fw">
+                    <div class="fl fw" id="productNameField">
                         <label>Nome do produto *</label>
                         <input id="pNome" placeholder="<?= $businessFood ? 'Ex: X-Bacon Artesanal' : 'Ex: Camisa esportiva' ?>">
                         <span class="hint">Como o produto aparecerá no catálogo</span>
                     </div>
-                    <div class="fl fw">
-                        <label>Código / SKU *</label>
+                    <div class="fl fw" id="productSkuField">
+                        <label for="pCod"><?= $businessFood ? 'Código interno / SKU (gerado se ficar vazio)' : 'Código / SKU *' ?></label>
                         <input id="pCod" placeholder="<?= $businessFood ? 'Ex: LAN-001' : 'Ex: CAM-001' ?>">
-                        <span class="hint">Código único de identificação</span>
+                        <span class="hint">Código único de identificação. <button type="button" id="genSku" class="wizard-inline-link">Gerar código</button></span>
                     </div>
-                    <div class="fl fw">
-                        <label>Descrição</label>
+                    <div class="fl fw" id="productDescriptionField">
+                        <label><?= $businessFood ? 'Descrição e ingredientes' : 'Descrição' ?></label>
                         <textarea id="pDesc" rows="3" placeholder="<?= $businessFood ? 'Descreva ingredientes, preparo e o que acompanha o produto…' : 'Detalhe material, modelo, cores ou outras características…' ?>"></textarea>
                     </div>
                     <div class="fl fw" id="pCategoriaControl" hidden>
@@ -580,8 +597,14 @@ button{font-family:inherit;cursor:pointer}
                             <button class="pill pill-outline" id="pCancelarCategoria" type="button">Cancelar</button>
                         </div>
                         <span class="hint">A mesma categoria será usada na vitrine, sem classificar novamente.</span>
+                        <div id="categoryLoadStatus" class="category-load-status" role="status" aria-live="polite" hidden></div>
+                        <button class="pill pill-outline category-retry" type="button" id="categoryRetry" hidden>Tentar carregar categorias</button>
                     </div>
                 </div>
+                <details class="product-optional-control" id="productImageDetails">
+                    <summary>Adicionar foto ao catálogo <span style="font-weight:500;color:var(--faint)">Opcional</span></summary>
+                    <div class="product-optional-content" id="productImageContent"></div>
+                </details>
             </div>
 
             <div class="step-panel" id="s2">
@@ -628,10 +651,15 @@ button{font-family:inherit;cursor:pointer}
                         <label class="pill pill-outline customization-choice" for="customizationYes"><input id="customizationYes" name="customization" type="radio" value="yes"> Sim</label>
                     </div>
                 </fieldset>
+                <details class="product-optional-control" id="productValidityDetails">
+                    <summary>Validade e alertas <span style="font-weight:500;color:var(--faint)">Opcional</span></summary>
+                    <div class="product-optional-content" id="productValidityContent"></div>
+                </details>
+                <button type="button" id="btnQuickSave" class="btn-next wizard-quick-save" hidden>Salvar produto simples</button>
             </div>
 
             <div class="step-panel" id="s3">
-                <div class="val-toggle-wrap" id="valToggleWrap" onclick="toggleValidade()">
+                <div class="val-toggle-wrap" id="valToggleWrap" role="button" tabindex="0" aria-pressed="false" onclick="toggleValidade()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleValidade();}">
                     <div class="val-check" id="valCheck">
                         <span class="material-symbols-outlined">check</span>
                     </div>
@@ -774,23 +802,41 @@ button{font-family:inherit;cursor:pointer}
 
 <script>
 const CSRF = <?= json_encode(get_csrf_token()) ?>;
-let categoriasDisponiveis=[],categoriaSelecionada=null;
+let categoriasDisponiveis=[],categoriaSelecionada=null,categoriasProntas=false,categoriasRequest=null;
 function renderCategoriasProduto(){
     const select=document.getElementById('pCategoria');if(!select)return;
     select.replaceChildren(new Option('Sem categoria',''));
     categoriasDisponiveis.forEach(c=>select.add(new Option(c.nome,String(c.id))));
     select.value=categoriaSelecionada===null?'':String(categoriaSelecionada);
+    select.disabled=false;
+    categoriasProntas=true;
     document.getElementById('pCategoriaControl').hidden=false;
+    document.getElementById('categoryLoadStatus').hidden=true;
+    document.getElementById('categoryRetry').hidden=true;
 }
 async function carregarCategoriasProduto(){
-    try{
-        const r=await fetch('catalogo_categorias_api.php?acao=listar',{credentials:'same-origin'});
-        const j=await r.json();if(!r.ok||!j.ok)return;
-        categoriasDisponiveis=Array.isArray(j.categorias)?j.categorias:[];renderCategoriasProduto();
-    }catch(error){console.warn('[Categorias] Erro ao carregar:',error);}
+    if(categoriasProntas)return true;
+    if(categoriasRequest)return categoriasRequest;
+    categoriasRequest=(async()=>{
+        try{
+            const r=await fetch('catalogo_categorias_api.php?acao=listar',{credentials:'same-origin'});
+            const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'Não foi possível carregar as categorias.');
+            categoriasDisponiveis=Array.isArray(j.categorias)?j.categorias:[];renderCategoriasProduto();return true;
+        }catch(error){
+            console.warn('[Categorias] Erro ao carregar:',error);
+            const control=document.getElementById('pCategoriaControl');
+            control.hidden=false;document.getElementById('pCategoria').disabled=true;
+            const status=document.getElementById('categoryLoadStatus');
+            status.textContent='As categorias não carregaram. Você pode tentar novamente; os demais dados do produto serão preservados.';status.hidden=false;
+            document.getElementById('categoryRetry').hidden=false;
+            return false;
+        }finally{categoriasRequest=null;}
+    })();
+    return categoriasRequest;
 }
 document.addEventListener('DOMContentLoaded',carregarCategoriasProduto);
 document.addEventListener('click',async event=>{
+    if(event.target.closest('#categoryRetry')){await carregarCategoriasProduto();return;}
     if(event.target.closest('#btnCriarCategoria')){document.getElementById('pNovaCategoriaWrap').hidden=false;document.getElementById('pNovaCategoria').focus();}
     if(event.target.closest('#pCancelarCategoria')){document.getElementById('pNovaCategoriaWrap').hidden=true;document.getElementById('pNovaCategoria').value='';}
     if(event.target.closest('#pSalvarCategoria')){
@@ -819,6 +865,34 @@ const BUSINESS_CONTEXT = <?= json_encode([
 const $ = id => document.getElementById(id);
 const esc = v => String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const R = v => 'R$\u00a0'+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
+function generateProductSku(){
+    const bytes=new Uint8Array(6);
+    if(window.crypto?.getRandomValues)window.crypto.getRandomValues(bytes);
+    else for(let i=0;i<bytes.length;i++)bytes[i]=Math.floor(Math.random()*256);
+    const suffix=Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('').toUpperCase();
+    return (BUSINESS_CONTEXT.familia==='alimentacao'?'ALIM':'PROD')+'-'+suffix;
+}
+$('genSku').addEventListener('click',()=>{
+    $('pCod').value=generateProductSku();
+    wizardFieldsDirty=true;
+});
+function updateQuickSaveVisibility(){
+    const button=$('btnQuickSave');if(!button)return;
+    const simple=!editId&&!customizationEnabled&&!$('sizeYes').classList.contains('on');
+    button.hidden=!(simple&&activeStepId===2);
+}
+$('btnQuickSave').addEventListener('click',()=>saveProduct());
+
+function compactOptionalWizardPanels(){
+    const moves=[['s3','productValidityContent'],['s4','productImageContent']];
+    for(const [sourceId,targetId] of moves){
+        const source=$(sourceId),target=$(targetId);
+        if(!source||!target)continue;
+        while(source.firstChild)target.appendChild(source.firstChild);
+        source.remove();
+    }
+}
+compactOptionalWizardPanels();
 
 function diasParaVencer(dataStr) {
     if (!dataStr) return null;
@@ -939,6 +1013,7 @@ function toggleValidade(){
 
     check.classList.toggle('on', temValidade);
     wrap.classList.toggle('active', temValidade);
+    wrap.setAttribute('aria-pressed',String(temValidade));
     section.classList.toggle('on', temValidade);
     noWrap.style.display = temValidade ? 'none' : 'block';
 
@@ -980,20 +1055,18 @@ function showPrev(f){
 }
 
 const STEPS=[
-    {id:1,title:'Informações básicas',sub:'Nome, código e descrição do produto'},
-    {id:2,title:'Preço e estoque',sub:'Defina o valor de venda e quantidade inicial'},
+    {id:1,title:BUSINESS_CONTEXT.familia==='alimentacao'?'Produto e cardápio':'Informações do produto',sub:BUSINESS_CONTEXT.familia==='alimentacao'?'Informe nome, categoria e o que acompanha o produto.':'Informe nome, identificação e detalhes do produto.'},
+    {id:2,title:'Preço e disponibilidade',sub:BUSINESS_CONTEXT.familia==='alimentacao'?'Defina o preço, os tamanhos e a quantidade disponível.':'Defina o preço, os tamanhos e o estoque.'},
     {id:5,title:'Personalização do produto',sub:'Organize e reutilize as escolhas do cliente'},
-    {id:3,title:'Validade',sub:'Informe se o produto possui data de vencimento'},
-    {id:4,title:'Foto do produto',sub:'Adicione uma imagem para o catálogo'},
     {id:6,title:'Confirmar e salvar',sub:'Revise os dados antes de salvar'},
 ];
 let curStep=1,activeStepId=1,editId=null;
-let sizeDraft=[];
+let sizeDraft=[],stockBeforeSizeChoice=0;
 let complementsEditor=null;
 let customizationEnabled=false,customizationChoiceExplicit=false,customizationDisableConfirmed=false;
 let wizardBaseline='',skipWizardLeaveWarning=false,wizardFieldsDirty=false;
 
-function wizardSteps(){return customizationEnabled?STEPS:STEPS.filter(step=>step.id!==5);}
+function wizardSteps(){return STEPS.filter(step=>step.id!==5||customizationEnabled);}
 function wizardPositionForId(id){const position=wizardSteps().findIndex(step=>step.id===id);return position<0?1:position+1;}
 function activeWizardStep(){return wizardSteps()[curStep-1]||wizardSteps()[0];}
 function setCustomizationEnabled(enabled,{explicit=false}={}){
@@ -1007,6 +1080,7 @@ function setCustomizationEnabled(enabled,{explicit=false}={}){
         buildDots();
         gotoStep(wizardPositionForId(activeStepId));
     }
+    updateQuickSaveVisibility();
 }
 function removeProductComplementsAfterConfirmation(){
     if(!complementsEditor?.groups?.length)return true;
@@ -1055,9 +1129,17 @@ const COMMON_SIZES=['PP','P','M','G','GG','XG','XXG'];
 function renderSizeEditor(){
     const enabled = $('sizeYes').classList.contains('on');
 
+    // Em produtos com tamanhos o agregado é apenas leitura: nenhuma unidade
+    // deve ser atribuída automaticamente à primeira variação.
     $('pQtd').disabled=false;
-    $('qsMinus').disabled=false;
-    $('qsPlus').disabled=false;
+    $('pQtd').readOnly=enabled;
+    $('pQtd').setAttribute('aria-readonly',String(enabled));
+    $('qsMinus').disabled=enabled;
+    $('qsPlus').disabled=enabled;
+    $('stockQuantityLabel').textContent=enabled?'Estoque total dos tamanhos':(editId?'Quantidade em estoque':'Quantidade inicial em estoque');
+    $('stockQuantityHint').textContent=enabled
+        ?'Total calculado pelas quantidades de cada tamanho. Edite os tamanhos abaixo para ajustar.'
+        :'Informe a quantidade disponível deste produto.';
 
     $('sizeEditor').hidden=!enabled;
 
@@ -1087,17 +1169,11 @@ function renderSizeEditor(){
 function renderSizeTotal(){
     const total=sizeDraft.reduce((n,s)=>n+Math.max(0,Number(s.quantidade)||0),0);
     $('sizeTotal').textContent=`Estoque total: ${total} unidades`;
-    $('pQtd').value=total;
+    // Ao abrir/editar um produto comum, preservar a quantidade existente.
+    // O agregado só deve refletir os tamanhos quando o controle estiver ativo.
+    if($('sizeYes').classList.contains('on'))$('pQtd').value=total;
 }
 
-function applyAggregateStock(target){
-    target=Math.max(0,Math.floor(Number(target)||0));
-    const current=sizeDraft.reduce((n,s)=>n+Math.max(0,Number(s.quantidade)||0),0),difference=target-current;
-    if(!difference||!sizeDraft.length)return;
-    if(difference>0){sizeDraft[0].quantidade=(Number(sizeDraft[0].quantidade)||0)+difference;return;}
-    let remaining=Math.abs(difference);
-    [...sizeDraft].reverse().forEach(size=>{const available=Math.max(0,Number(size.quantidade)||0),remove=Math.min(available,remaining);size.quantidade=available-remove;remaining-=remove;});
-}
 
 function addSize(name){
     name=String(name||'').trim().toUpperCase();
@@ -1128,16 +1204,31 @@ function sizesSuggestionUse(sizes){
 }
 
 $('sizeYes').addEventListener('click',()=>{
+    const original=editId?estoque.find(p=>Number(p.id)===Number(editId)):null;
+    if(original&&!productUsesSizes(original)&&Number(original.quantidade)>0){
+        toast('Este produto já tem estoque. Use a opção Configurar tamanhos no menu do produto para distribuir as unidades sem perda.','warn',5500);
+        return;
+    }
+    if(!$('sizeYes').classList.contains('on'))stockBeforeSizeChoice=Math.max(0,Number($('pQtd').value)||0);
     $('sizeYes').classList.add('on');
     $('sizeNo').classList.remove('on');
     renderSizeEditor();
+    updateQuickSaveVisibility();
 });
 
 $('sizeNo').addEventListener('click',()=>{
+    const original=editId?estoque.find(p=>Number(p.id)===Number(editId)):null;
+    if(original&&productUsesSizes(original)){
+        toast('O produto já utiliza tamanhos. Ajuste as quantidades por tamanho; remover o controle requer conversão específica.','warn',5500);
+        return;
+    }
+    const wasEnabled=$('sizeYes').classList.contains('on');
     sizeDraft=[];
     $('sizeNo').classList.add('on');
     $('sizeYes').classList.remove('on');
     renderSizeEditor();
+    if(wasEnabled)$('pQtd').value=stockBeforeSizeChoice;
+    updateQuickSaveVisibility();
 });
 
 $('sizeCustom').addEventListener('click',()=>{
@@ -1183,19 +1274,22 @@ function gotoStep(position){
     }
     if(activeStepId===6)buildReview();
     updateComplementsNavigation();
+    updateQuickSaveVisibility();
 }
 
 function validateStep(stepId){
     if(stepId===1){
         if(!$('pNome').value.trim()){toast('Informe o nome do produto','err');return false}
-        if(!$('pCod').value.trim()){toast('Informe o código / SKU','err');return false}
+        if(!$('pCod').value.trim()){
+            if(BUSINESS_CONTEXT.familia==='alimentacao'&&!editId){
+                $('pCod').value=generateProductSku();
+            }else{toast('Informe o código / SKU','err');return false;}
+        }
     }
     if(stepId===2){
         if(!$('pPreco').value||parseFloat($('pPreco').value)<=0){toast('Informe o preço de venda','err');return false}
         if($('sizeYes').classList.contains('on')&&!sizeDraft.length){toast('Selecione pelo menos um tamanho','err');return false}
-    }
-    if(stepId===3 && temValidade){
-        if(!$('pValidade').value){toast('Informe a data de validade','err');return false}
+        if(temValidade&&!$('pValidade').value){toast('Informe a data de validade','err');return false}
     }
     if(stepId===5 && customizationEnabled&&(!complementsEditor || !complementsEditor.validate())){
         toast(complementsEditor?.ready?'Conclua ou cancele o opcional em edição para avançar.':'Aguarde o carregamento dos opcionais.','err');return false;
@@ -1224,7 +1318,7 @@ function buildReview(){
             <div class="review-row"><span class="rr-l">Nome</span><span class="rr-v">${esc($('pNome').value||'—')}</span></div>
             <div class="review-row"><span class="rr-l">Código</span><span class="rr-v">${esc($('pCod').value||'—')}</span></div>
             <div class="review-row"><span class="rr-l">Descrição</span><span class="rr-v" style="max-width:60%;text-align:right;font-size:.78rem">${esc($('pDesc').value||'—')}</span></div>
-             ${!$('pCategoriaControl').hidden?'<div class="review-row"><span class="rr-l">Categoria</span><span class="rr-v">'+esc($('pCategoria').selectedOptions[0]?.textContent||'Sem categoria')+'</span></div>':''}
+             ${categoriasProntas?'<div class="review-row"><span class="rr-l">Categoria</span><span class="rr-v">'+esc($('pCategoria').selectedOptions[0]?.textContent||'Sem categoria')+'</span></div>':''}
         </div>
         <div class="review-card">
             <div class="review-row"><span class="rr-l">Preço de venda</span><span class="rr-v" style="color:var(--p)">${R($('pPreco').value)}</span></div>
@@ -1271,12 +1365,13 @@ function openM(p=null){
     editId=p?.id??null;
     const hasStructuredSizes=productUsesSizes(p);
     $('stockQuantityLabel').textContent=editId?'Quantidade em estoque':'Quantidade inicial em estoque';
-    $('stockQuantityHint').textContent=hasStructuredSizes?'Altere o total para uma reposição rápida; a diferença vai para a primeira variação ativa.':'Altere a quantidade para registrar uma reposição deste produto.';
+    $('stockQuantityHint').textContent=hasStructuredSizes?'O total é calculado pelos tamanhos. Edite cada quantidade individualmente.':'Informe a quantidade disponível deste produto.';
     $('pNome').value=p?.nome??'';
     $('pCod').value=p?.codigo??'';
     $('pPreco').value=p?Number(p.preco).toFixed(2):'';
     $('pCusto').value=p?Number(p.preco_custo||0).toFixed(2):'';
     $('pQtd').value=p?.quantidade??1;
+    stockBeforeSizeChoice=Math.max(0,Number($('pQtd').value)||0);
     $('pDesc').value=p?.descricao??'';
     categoriaSelecionada=p?.categoria_id?Number(p.categoria_id):null;
     if(categoriasDisponiveis.length)renderCategoriasProduto();else carregarCategoriasProduto();
@@ -1304,8 +1399,11 @@ function openM(p=null){
     $('fImg').value='';
 
     temValidade = !!(p?.validade);
+    $('productValidityDetails').open=temValidade;
+    $('productImageDetails').open=Boolean(p?.imagem)||(BUSINESS_CONTEXT.prioridades_cadastro||[]).includes('imagens');
     $('valCheck').classList.toggle('on', temValidade);
     $('valToggleWrap').classList.toggle('active', temValidade);
+    $('valToggleWrap').setAttribute('aria-pressed',String(temValidade));
     $('valDateSection').classList.toggle('on', temValidade);
     $('valNenhumaTxt').style.display = temValidade ? 'none' : 'block';
     $('pValidade').value = p?.validade ?? '';
@@ -1382,10 +1480,12 @@ function openProductActions(event,id){
     const anchor=event.currentTarget,p=estoque.find(item=>Number(item.id)===Number(id)),popover=$('productActionPopover');if(!p)return;
     if(productActionAnchor===anchor&&!popover.hidden){closeProductActions();return}
     closeProductActions();productActionAnchor=anchor;anchor.setAttribute('aria-expanded','true');
-    popover.innerHTML=`<button type="button" data-action="edit">Editar</button><button type="button" data-action="complements">Gerenciar complementos</button><button type="button" data-action="stock">${productUsesSizes(p)?'Atualizar tamanhos':'Ajustar estoque'}</button><button type="button" data-action="duplicate">Duplicar</button><hr><button class="danger" type="button" data-action="delete">Excluir</button>`;
+    popover.innerHTML=`<button type="button" data-action="edit">Editar</button><button type="button" data-action="complements">Gerenciar complementos</button><button type="button" data-action="stock">${productUsesSizes(p)?'Atualizar tamanhos':'Ajustar estoque'}</button>${!productUsesSizes(p)?'<button type="button" data-action="setup-sizes">Configurar tamanhos</button>':''}<button type="button" data-action="duplicate">Duplicar</button><hr><button class="danger" type="button" data-action="delete">Excluir</button>`;
     popover.querySelector('[data-action="edit"]').onclick=()=>{closeProductActions();editProduct(id)};
     popover.querySelector('[data-action="complements"]').onclick=()=>{window.location.href=`complementos.php?produto_id=${encodeURIComponent(id)}`};
     popover.querySelector('[data-action="stock"]').onclick=()=>{closeProductActions();productUsesSizes(p)?openSizeStock(id):openAggregateStockEdit(id)};
+    const setupSizes=popover.querySelector('[data-action="setup-sizes"]');
+    if(setupSizes)setupSizes.onclick=()=>{closeProductActions();openSizeStock(id)};
     popover.querySelector('[data-action="duplicate"]').onclick=()=>{closeProductActions();duplicateProd(id)};
     popover.querySelector('[data-action="delete"]').onclick=()=>{closeProductActions();delProd(id,p.nome||'')};
     popover.hidden=false;requestAnimationFrame(positionProductActions);
@@ -1491,16 +1591,16 @@ $('btnNext').addEventListener('click',async()=>{
 });
 
 async function saveProduct(){
-    const btn=$('btnNext');
-    if(btn.disabled)return;
-    const requiredSteps=customizationEnabled?[1,2,3,5]:[1,2,3];
+    const btn=$('btnNext'),quick=$('btnQuickSave');
+    if(btn.disabled||quick?.disabled)return;
+    const requiredSteps=customizationEnabled?[1,2,5]:[1,2];
     if(!requiredSteps.every(validateStep))return;
     const existingId=Number(editId);
     const wasEditing=Number.isInteger(existingId)&&existingId>0;
     if(editId!==null&&!wasEditing){toast('Reabra o produto pela lista para continuar a edição.','err');return;}
     const acao=wasEditing?'editar':'adicionar';
     let productPersisted=false;
-    if(sizeDraft.length)applyAggregateStock($('pQtd').value);
+    // Quantidade consolidada é derivada exclusivamente dos tamanhos.
     const fd=new FormData();
     fd.append('id',editId??'');
     fd.append('nome',$('pNome').value.trim());
@@ -1509,12 +1609,13 @@ async function saveProduct(){
     fd.append('preco_custo',$('pCusto').value.trim() || '0');
     fd.append('quantidade',sizeDraft.length?String(sizeDraft.reduce((n,s)=>n+(Number(s.quantidade)||0),0)):$('pQtd').value.trim());
     fd.append('descricao',$('pDesc').value.trim());
-    if(!$('pCategoriaControl').hidden)fd.append('categoria_id',$('pCategoria').value);
+    if(categoriasProntas)fd.append('categoria_id',$('pCategoria').value);
     fd.append('validade', temValidade ? $('pValidade').value : '');
     fd.append('csrf_token',CSRF);
     if($('fImg').files[0])fd.append('imagem',$('fImg').files[0]);
 
     btn.disabled=true;
+    if(quick)quick.disabled=true;
     btn.innerHTML='<span class="material-symbols-outlined">hourglass_empty</span>Salvando…';
 
     try{
@@ -1544,14 +1645,19 @@ async function saveProduct(){
             toast(wasEditing?'Produto atualizado!':'Produto cadastrado!');
             await loadAll();
         } else {
-            toast(j.error||'Erro ao salvar','err');
+            toast(j.error||'Não foi possível salvar o produto. Revise os campos e tente novamente.','err');
         }
     }catch(e){
         console.error('[Produtos] Erro ao salvar produto:',e);
         if(e.status===409&&customizationEnabled)gotoStep(wizardPositionForId(5));
-        toast(productPersisted?'Produto salvo. '+(e?.message||'Erro ao salvar adicionais ou tamanhos')+' Tente salvar novamente para concluir.':(e?.message||'Erro de conexão'),'err');
+        const rawMessage=String(e?.message||'');
+        const safeMessage=/failed to fetch|networkerror|load failed|unexpected token|json|http 5\d\d|500/i.test(rawMessage)
+            ?'O servidor não conseguiu concluir o salvamento. Verifique a conexão e tente novamente.'
+            :(rawMessage||'Não foi possível concluir o salvamento. Tente novamente.');
+        toast(productPersisted?'Produto salvo. '+safeMessage+' Os dados permanecem; tente salvar novamente para concluir.':safeMessage,'err');
     }finally{
         btn.disabled=false;
+        if(quick)quick.disabled=false;
         btn.innerHTML='<span class="material-symbols-outlined">save</span>Salvar';
     }
 }
@@ -1933,3 +2039,4 @@ window.onload=loadAll;
 </script>
 </body>
 </html>
+

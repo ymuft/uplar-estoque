@@ -460,6 +460,7 @@ img{display:block;max-width:100%}
 }
 </style>
 <style><?php readfile(__DIR__ . '/assets/vitrine-experience.css'); ?></style>
+<script src="assets/storefront-menu.js?v=20261010.1"></script>
 </head>
 <body data-experience="<?= htmlspecialchars($experienceMode, ENT_QUOTES, 'UTF-8') ?>">
 <div class="app" id="app">
@@ -479,7 +480,7 @@ img{display:block;max-width:100%}
     </div>
 
     <!-- Hero -->
-    <div class="hero">
+    <div class="hero<?= ($banner && file_exists($banner)) ? '' : ' hero-empty' ?>">
         <?php if($banner && file_exists($banner)): ?>
         <img src="<?= htmlspecialchars($banner) ?>" alt="Banner">
         <?php endif; ?>
@@ -578,9 +579,9 @@ img{display:block;max-width:100%}
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4zm2.5 2.1h-15V5h15v14.1zm0-16.1h-15C3.1 3 2 4.1 2 5.25V20c0 1.1.9 2 2 2h15c1.1 0 2-.9 2-2V5.25C21 4.1 19.9 3 18.5 3z"/></svg>
             Pedidos
         </button>
-        <button class="bnav-a" onclick="openCart()">
+        <button class="bnav-a cart-nav" id="btnNavCart" onclick="openCart()" aria-label="Abrir carrinho">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 6h-2c0-2.76-2.24-5-5-5S7 3.24 7 6H5c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm-7-3c1.66 0 3 1.34 3 3H9c0-1.66 1.34-3 3-3zm0 10c-2.21 0-4-1.79-4-4h2c0 1.1.9 2 2 2s2-.9 2-2h2c0 2.21-1.79 4-4 4z"/></svg>
-            Loja
+            <span class="cart-nav-copy"><span id="cartNavLabel">Meu carrinho</span><small id="cartNavMeta" hidden></small></span>
         </button>
     </div>
 </nav>
@@ -718,14 +719,19 @@ function productSelectedStock(){
 function gerarCats(){
     const cats=$('cats');cats.innerHTML='';cats.hidden=false;
     const configured=(EXPERIENCE.categorias||[]).filter(c=>Array.isArray(c.produto_ids)&&c.produto_ids.length);
-    let choices=configured.map(c=>({id:String(c.id),nome:String(c.nome),produto_ids:c.produto_ids}));
+    const visible=EXPERIENCE.indisponiveis==='ocultar'?produtos.filter(p=>productStock(p)>0):produtos;
+    const grouped=UplarStorefrontMenu.groupProducts(visible,configured);
+    let choices=grouped.groups.map(c=>({id:String(c.id),nome:String(c.nome),produto_ids:c.produtos.map(p=>Number(p.id))}));
+    if(document.body.dataset.experience==='cardapio'&&choices.length&&grouped.uncategorized.length){
+        choices.push({id:'outros',nome:'Sem categoria',produto_ids:grouped.uncategorized.map(p=>Number(p.id))});
+    }
     if(!choices.length&&document.body.dataset.experience==='padrao'){
         const legacy=[...new Set(produtos.map(p=>String(p.nome||'').split(' ')[0].toUpperCase()).filter(Boolean))].slice(0,8);
         choices=legacy.map(name=>({id:name,nome:name,legacy:true}));
     }
     if(!choices.length){cats.hidden=true;}else{
-        const all=document.createElement('button');all.className='cat-btn on';all.dataset.cat='todos';all.textContent='Todos';all.onclick=()=>setCat('todos',all);cats.appendChild(all);
-        choices.forEach(c=>{const button=document.createElement('button');button.className='cat-btn';button.dataset.cat=c.id;button.textContent=c.nome;button.onclick=()=>setCat(c.id,button);cats.appendChild(button);});
+        const all=document.createElement('button');all.className='cat-btn on';all.type='button';all.dataset.cat='todos';all.setAttribute('aria-pressed','true');all.textContent='Todos';all.onclick=()=>setCat('todos',all);cats.appendChild(all);
+        choices.forEach(c=>{const button=document.createElement('button');button.className='cat-btn';button.type='button';button.dataset.cat=c.id;button.setAttribute('aria-pressed','false');button.textContent=c.nome;button.onclick=()=>setCat(c.id,button);cats.appendChild(button);});
     }
     $('catalogTools').hidden=document.body.dataset.experience!=='loja';
     $('availabilityFilter').hidden=!produtos.some(p=>productStock(p)<1);
@@ -738,12 +744,50 @@ function gerarCats(){
     status.textContent=unavailable?'A loja está temporariamente sem receber pedidos.':disabledModes.join(' ');
 }
 
+let menuScrollFrame=0;
+function setMenuActiveCategory(category,ensureVisible=false){
+    const nav=$('cats');
+    for(const button of nav.querySelectorAll('.cat-btn')){
+        const on=button.dataset.cat===String(category);
+        button.classList.toggle('on',on);
+        button.setAttribute('aria-pressed',String(on));
+        if(on&&ensureVisible){
+            const rect=button.getBoundingClientRect(),bounds=nav.getBoundingClientRect();
+            if(rect.left<bounds.left+12||rect.right>bounds.right-12){
+                button.scrollIntoView({block:'nearest',inline:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth'});
+            }
+        }
+    }
+}
+function syncMenuCategoryOnScroll(){
+    menuScrollFrame=0;
+    if(document.body.dataset.experience!=='cardapio'||$('cats').hidden||buscaTxt)return;
+    const topbar=document.querySelector('.topbar');
+    const offset=(topbar?.getBoundingClientRect().height||0)+$('cats').getBoundingClientRect().height+14;
+    const sections=[...$('prodList').querySelectorAll('.menu-category')].map(section=>({
+        id:section.dataset.category,
+        top:section.getBoundingClientRect().top
+    }));
+    const active=UplarStorefrontMenu.categoryAtOffset(sections,offset);
+    setMenuActiveCategory(active,true);
+}
+function scheduleMenuCategorySync(){
+    if(menuScrollFrame)return;
+    menuScrollFrame=requestAnimationFrame(syncMenuCategoryOnScroll);
+}
 function setCat(cat,btn){
-    catAtual=cat;
-    document.querySelectorAll('.cat-btn').forEach(b=>b.classList.remove('on'));
-    btn.classList.add('on');
-    renderProdutos();
-    if(document.body.dataset.experience==='cardapio'&&cat!=='todos'){const section=document.getElementById(`menu-category-${CSS.escape(String(cat))}`);section?.scrollIntoView({behavior:'smooth',block:'start'});}
+    if(document.body.dataset.experience==='cardapio'&&$('prodList').querySelector('.menu-category')){
+        // Cardápio com seções: navega até a categoria sem esconder o restante.
+        catAtual='todos';
+        if(buscaTxt){buscaTxt='';$('busca').value='';renderProdutos();}
+        setMenuActiveCategory(cat,true);
+        const target=cat==='todos' ? $('prodList') : [...$('prodList').querySelectorAll('.menu-category')].find(s=>s.dataset.category===String(cat));
+        (target||$('prodList')).scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
+    }else{
+        catAtual=cat;
+        setMenuActiveCategory(cat);
+        renderProdutos();
+    }
     storeTrack('category_filter');
 }
 
@@ -785,7 +829,7 @@ function cardProduto(p,featured=false){
     const imagem=p.imagem?`<img src="${esc(p.imagem)}" alt="${esc(p.nome)}" loading="lazy">`:'<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
     const action=productAction(p),configure=Boolean(p.usa_tamanhos||p.tem_complementos);
     const noFulfillment=EXPERIENCE.retirada_habilitada===false&&EXPERIENCE.entrega_habilitada===false;const add=`<button class="prod-action" type="button" ${sold||noFulfillment?'disabled':''} aria-label="${esc(action)} ${esc(p.nome)}" onclick="event.stopPropagation();${configure?'openProdById('+p.id+')':'addToCart('+p.id+',1)'}" id="add-${p.id}">${esc(action)}</button>`;
-    return `<article class="prod-card ${featured?'featured-card ':''}${destaque} ${sold?'sold-out':''}" tabindex="0" onclick="openProdById(${p.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProdById(${p.id})}">
+    return `<article class="prod-card ${featured?'featured-card ':''}${destaque} ${sold?'sold-out':''}" tabindex="0" onclick="if(!event.target.closest('button,a,input'))openProdById(${p.id})" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openProdById(${p.id})}">
         <div class="prod-img">${imagem}</div><div class="prod-body">${badgeDestaque(p)}<div class="prod-name">${esc(p.nome)}</div>${descricao}${sizes}<div class="prod-card-bottom"><div><div class="prod-price">${R(p.preco)}</div>${sold?'<span class="stock-label">Esgotado</span>':''}</div>${add}</div></div>
     </article>`;
 }
@@ -826,10 +870,16 @@ function renderProdutos(){
     let f=[...produtos];
     const configuredCategories=(EXPERIENCE.categorias||[]).filter(c=>Array.isArray(c.produto_ids)&&c.produto_ids.length);
     const selectedCategory=configuredCategories.find(c=>String(c.id)===String(catAtual));
+    const categoryProductIds=new Map(configuredCategories.map(category=>[String(category.id),new Set(category.produto_ids.map(Number))]));
+    const categoryByProduct=new Map();
+    for(const category of configuredCategories){
+        const ids=categoryProductIds.get(String(category.id));
+        for(const id of ids)if(!categoryByProduct.has(id))categoryByProduct.set(id,category);
+    }
     const legacyCategory=catAtual!=='todos'&&!selectedCategory&&document.body.dataset.experience==='padrao';
-    if(selectedCategory){const ids=new Set((selectedCategory.produto_ids||[]).map(Number));f=f.filter(p=>ids.has(Number(p.id)));}
+    if(selectedCategory){const ids=categoryProductIds.get(String(selectedCategory.id))||new Set();f=f.filter(p=>ids.has(Number(p.id)));}
     else if(legacyCategory)f=f.filter(p=>String(p.nome||'').toUpperCase().startsWith(String(catAtual).toUpperCase()));
-    if(buscaTxt)f=f.filter(p=>{const category=configuredCategories.find(c=>c.produto_ids.map(Number).includes(Number(p.id)));return `${p.nome||''} ${p.descricao||''} ${category?.nome||''}`.toLowerCase().includes(buscaTxt);});
+    if(buscaTxt)f=f.filter(p=>`${p.nome||''} ${p.descricao||''} ${categoryByProduct.get(Number(p.id))?.nome||''}`.toLowerCase().includes(buscaTxt));
     if(EXPERIENCE.indisponiveis==='ocultar')f=f.filter(p=>productStock(p)>0);
     if($('onlyAvailable')?.checked)f=f.filter(p=>productStock(p)>0);
     if($('hasSize')?.checked)f=f.filter(p=>p.usa_tamanhos===true||(Array.isArray(p.tamanhos)&&p.tamanhos.length>0));
@@ -843,13 +893,18 @@ function renderProdutos(){
     $('secTitle').textContent=catAtual==='todos'?(configuredCategories.length||document.body.dataset.experience==='padrao'&&produtos.length?'Todos os produtos':'Produtos'):(selectedCategory?.nome||catAtual.charAt(0)+catAtual.slice(1).toLowerCase());
     if(!f.length){featuredSection.hidden=true;catalogHead.hidden=false;list.innerHTML='<div class="empty-state"><p>Nenhum produto encontrado.</p></div>';return;}
     if(document.body.dataset.experience==='cardapio'&&configuredCategories.length){
-        featuredSection.hidden=true;catalogHead.hidden=false;
-        const groups=configuredCategories.map(category=>({id:category.id,nome:category.nome,produtos:f.filter(p=>category.produto_ids.map(Number).includes(Number(p.id)))})).filter(group=>group.produtos.length);
-        const assigned=new Set(groups.flatMap(group=>group.produtos.map(p=>Number(p.id))));
-        const uncategorized=f.filter(p=>!assigned.has(Number(p.id)));
-        if(uncategorized.length)groups.push({id:'outros',nome:'Outros produtos não atribuídos',produtos:uncategorized});
-        list.innerHTML=groups.map(group=>`<section class="menu-category" id="menu-category-${esc(group.id)}"><h2>${esc(group.nome)}</h2><div class="menu-category-products">${group.produtos.map(p=>cardProduto(p)).join('')}</div></section>`).join('');
-        featuredList.innerHTML='';return;
+        // Destaques aparecem com selo dentro da própria categoria,
+        // evitando duplicar cards e categorias vazias na navegação.
+        featuredSection.hidden=true;
+        featuredList.replaceChildren();
+        const grouped=UplarStorefrontMenu.groupProducts(f,configuredCategories);
+        const groups=grouped.groups;
+        if(grouped.uncategorized.length)groups.push({id:'outros',nome:'Sem categoria',produtos:grouped.uncategorized});
+        catalogHead.hidden=true;
+        list.innerHTML=groups.map(group=>`<section class="menu-category" id="menu-category-${esc(group.id)}" data-category="${esc(group.id)}"><h2>${esc(group.nome)}</h2><div class="menu-category-products">${group.produtos.map(p=>cardProduto(p)).join('')}</div></section>`).join('');
+        if(buscaTxt)setMenuActiveCategory('todos');
+        else scheduleMenuCategorySync();
+        return;
     }
     featuredSection.hidden=!destaques.length;catalogHead.hidden=!comuns.length;
     featuredList.innerHTML=destaques.map(p=>cardProduto(p,true)).join('');
@@ -1086,6 +1141,25 @@ async function addFromSheet(pid){
 let cartCount=0,cartItemsSnapshot=[],cartSnapshotTotal=0,cartSnapshotFee=0;
 const CART_STORAGE_KEY=`uplar:vitrine:${SLUG}:cart:v1`;
 
+function updateCartNavigation(){
+    const cardapio=document.body.dataset.experience==='cardapio';
+    const label=cardapio?'Meu pedido':document.body.dataset.experience==='loja'?'Meu carrinho':'Carrinho';
+    const title=$('cartTitle'),navLabel=$('cartNavLabel'),navMeta=$('cartNavMeta'),navButton=$('btnNavCart');
+    if(title)title.textContent=label;
+    if(navLabel)navLabel.textContent=label;
+    if(navMeta){
+        const hasItems=Number(cartCount)>0;
+        const itemLabel=Number(cartCount)===1?'item':'itens';
+        const total=Number(cartSnapshotTotal)+(typeof tipoEnt!=='undefined'&&tipoEnt==='entrega'?Number(cartSnapshotFee):0);
+        navMeta.textContent=hasItems?`${cartCount} ${itemLabel} · ${R(total)}`:'';
+        navMeta.hidden=!hasItems;
+    }
+    if(navButton){
+        const count=Number(cartCount)||0;
+        navButton.setAttribute('aria-label',count?`${label}, ${count} ${count===1?'item':'itens'}`:label);
+    }
+}
+
 function readPersistentCart(){
     try{
         const raw=localStorage.getItem(CART_STORAGE_KEY);
@@ -1159,12 +1233,16 @@ async function updateCartCount(){
         if(j.ok){
             savePersistentCart(j.itens);
             cartCount=j.count||0;
+            cartSnapshotTotal=Number(j.total)||0;
+            cartSnapshotFee=Number(j.valor_frete)||0;
             const b=$('cartBadge');b.textContent=cartCount;b.classList.toggle('on',cartCount>0);
+            updateCartNavigation();
         }
     }catch{}
 }
 
 function openCart(){
+    updateCartNavigation();
     storeTrack('cart_view');
     $('cartBg').classList.add('on');
     $('cartSheet').style.display='flex';
@@ -1180,7 +1258,7 @@ async function loadCartSheet(){
         const r=await fetch(`vitrine_api.php?acao=carrinho_get&slug=${encodeURIComponent(SLUG)}`);
         const j=await r.json();
         if(!j.ok) throw new Error();
-        const itens=j.itens||[];cartItemsSnapshot=itens.map(item=>({...item}));cartSnapshotTotal=Number(j.total)||0;cartSnapshotFee=Number(j.valor_frete)||0;
+        const itens=j.itens||[];cartItemsSnapshot=itens.map(item=>({...item}));cartSnapshotTotal=Number(j.total)||0;cartSnapshotFee=Number(j.valor_frete)||0;cartCount=Number(j.count)||itens.reduce((sum,item)=>sum+Number(item.qtd_carrinho||0),0);updateCartNavigation();
         savePersistentCart(itens);
         if(!itens.length){
             $('cartBody').innerHTML='<div class="empty-state"><svg viewBox="0 0 24 24"><path d="M7 18c-1.1 0-1.99.9-1.99 2S5.9 22 7 22s2-.9 2-2-.9-2-2-2zM1 2v2h2l3.6 7.59-1.35 2.45c-.16.28-.25.61-.25.96C5 16.1 6.1 17 7 17h11v-2H7.42c-.14 0-.25-.11-.25-.25l.03-.12.9-1.63H18c.75 0 1.41-.41 1.75-1.03l3.58-6.49A1 1 0 0022.46 4H5.21l-.94-2H1zm16 16c-1.1 0-1.99.9-1.99 2s.89 2 1.99 2 2-.9 2-2-.9-2-2-2z"/></svg><p>Seu carrinho está vazio.</p></div>';
@@ -1241,6 +1319,7 @@ let tipoEnt=EXPERIENCE.retirada_habilitada!==false?'retirada':'entrega',delivery
 function setTipo(tipo){
     if(tipo==='entrega'&&EXPERIENCE.entrega_habilitada===false)return;if(tipo==='retirada'&&EXPERIENCE.retirada_habilitada===false)return;
     tipoEnt=tipo;
+    updateCartNavigation();
     const retTab=document.getElementById('tabRet'),entTab=document.getElementById('tabEnt');if(retTab)retTab.classList.toggle('on',tipo==='retirada');if(entTab)entTab.classList.toggle('on',tipo==='entrega');
     const info=document.getElementById('tipoInfo');
     if(!info)return;
@@ -1380,6 +1459,10 @@ window.visualViewport?.addEventListener('resize',()=>{const sheet=document.query
 
 document.addEventListener('DOMContentLoaded',()=>{
     carregarProdutos();restorePersistentCart().finally(updateCartCount);storeTrack('store_view');
+    if(document.body.dataset.experience==='cardapio'){
+        window.addEventListener('scroll',scheduleMenuCategorySync,{passive:true});
+        window.addEventListener('resize',scheduleMenuCategorySync,{passive:true});
+    }
     const header=document.querySelector('.topbar');if(header&&'ResizeObserver' in window)new ResizeObserver(()=>document.documentElement.style.setProperty('--store-header-height',header.getBoundingClientRect().height+'px')).observe(header);
     const nav=performance.getEntriesByType?.('navigation')?.[0];
     window.addEventListener('load',()=>storeTrack('page_load',null,Math.round(nav?.loadEventEnd||performance.now())),{once:true});
@@ -1397,3 +1480,4 @@ window.addEventListener('pagehide',()=>{
 </script>
 </body>
 </html>
+
