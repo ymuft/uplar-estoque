@@ -9,7 +9,7 @@ SET @uplar_profile_column_exists := (
 SET @uplar_profile_ddl := IF(
     @uplar_profile_column_exists = 0,
     'ALTER TABLE empresa_config ADD COLUMN perfil_negocio_json JSON NULL',
-    'SELECT ''perfil_negocio_json já existe'' AS resultado'
+    'DO 0'
 );
 PREPARE uplar_profile_stmt FROM @uplar_profile_ddl;
 EXECUTE uplar_profile_stmt;
