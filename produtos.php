@@ -394,6 +394,7 @@ button{font-family:inherit;cursor:pointer}
 @media(max-width:600px){.bnav{display:block}.main{padding:.9rem .9rem calc(68px + env(safe-area-inset-bottom))}.top{flex-direction:column;align-items:flex-start;margin-bottom:1rem}.searchbox{min-width:0;width:100%}.greeting{font-size:1.2rem}.pills{gap:.4rem}.pill{padding:.46rem .8rem;font-size:.76rem}.kpis{grid-template-columns:1fr 1fr;gap:.6rem}.kpi-val{font-size:1.35rem}.pg{grid-template-columns:1fr 1fr}.mbox{width:96%;max-height:96vh}.fg{grid-template-columns:1fr}.size-stock-dialog{width:calc(100vw - 1rem);max-height:calc(100vh - 1rem);border-radius:15px}.size-stock-head{padding:1rem}.size-stock-body{padding:.85rem 1rem}.size-stock-footer{padding:.75rem 1rem calc(.75rem + env(safe-area-inset-bottom))}.size-stock-change{grid-template-columns:1fr 1fr}.size-stock-change span:last-child{grid-column:1/-1;text-align:left}.product-action-popover{min-width:170px}}
 @media(max-width:380px){.kpis{grid-template-columns:1fr}.pg{grid-template-columns:1fr}}
 .customization-choice{min-height:44px;cursor:pointer;gap:.45rem}.customization-choice.on{background:var(--p-dim);border-color:var(--p);color:var(--p)}.customization-choice input{accent-color:var(--p)}
+#pCategoriaControl[hidden],#pNovaCategoriaWrap[hidden]{display:none!important}
 </style>
 <link rel="stylesheet" href="assets/app-theme.css?v=20260819.1">
 <script src="assets/app-theme.js?v=20260819.1"></script>
