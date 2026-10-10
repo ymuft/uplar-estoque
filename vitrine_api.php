@@ -1252,6 +1252,9 @@ case 'salvar_config':
             if ($experienceOptionsPosted) {
                 $experienceOptions = json_decode((string)$_POST['experiencia_opcoes'], true, 512, JSON_THROW_ON_ERROR);
                 if (!is_array($experienceOptions)) apierr('As opções da experiência são inválidas.', 422);
+                // A origem das categorias só muda pela ação explícita do M3,
+                // nunca por configurações gerais abertas em outra aba.
+                unset($experienceOptions['fonte_categorias']);
             }
             if ($modoEnviado || $experienceOptionsPosted) {
                 $mergedExperience = uplar_vitrine_experience_merge($cfgAtual['experiencia_json'] ?? null, $experienceOptions ?? []);
