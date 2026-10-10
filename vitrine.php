@@ -480,7 +480,7 @@ img{display:block;max-width:100%}
     </div>
 
     <!-- Hero -->
-    <div class="hero">
+    <div class="hero<?= ($banner && file_exists($banner)) ? '' : ' hero-empty' ?>">
         <?php if($banner && file_exists($banner)): ?>
         <img src="<?= htmlspecialchars($banner) ?>" alt="Banner">
         <?php endif; ?>
@@ -781,7 +781,7 @@ function setCat(cat,btn){
         catAtual='todos';
         if(buscaTxt){buscaTxt='';$('busca').value='';renderProdutos();}
         setMenuActiveCategory(cat,true);
-        const target=cat==='todos' ? $('catalogHead') : [...$('prodList').querySelectorAll('.menu-category')].find(s=>s.dataset.category===String(cat));
+        const target=cat==='todos' ? $('prodList') : [...$('prodList').querySelectorAll('.menu-category')].find(s=>s.dataset.category===String(cat));
         (target||$('prodList')).scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'instant':'smooth',block:'start'});
     }else{
         catAtual=cat;
@@ -829,7 +829,7 @@ function cardProduto(p,featured=false){
     const imagem=p.imagem?`<img src="${esc(p.imagem)}" alt="${esc(p.nome)}" loading="lazy">`:'<svg viewBox="0 0 24 24"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>';
     const action=productAction(p),configure=Boolean(p.usa_tamanhos||p.tem_complementos);
     const noFulfillment=EXPERIENCE.retirada_habilitada===false&&EXPERIENCE.entrega_habilitada===false;const add=`<button class="prod-action" type="button" ${sold||noFulfillment?'disabled':''} aria-label="${esc(action)} ${esc(p.nome)}" onclick="event.stopPropagation();${configure?'openProdById('+p.id+')':'addToCart('+p.id+',1)'}" id="add-${p.id}">${esc(action)}</button>`;
-    return `<article class="prod-card ${featured?'featured-card ':''}${destaque} ${sold?'sold-out':''}" tabindex="0" onclick="openProdById(${p.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openProdById(${p.id})}">
+    return `<article class="prod-card ${featured?'featured-card ':''}${destaque} ${sold?'sold-out':''}" tabindex="0" onclick="if(!event.target.closest('button,a,input'))openProdById(${p.id})" onkeydown="if(event.target===this&&(event.key==='Enter'||event.key===' ')){event.preventDefault();openProdById(${p.id})}">
         <div class="prod-img">${imagem}</div><div class="prod-body">${badgeDestaque(p)}<div class="prod-name">${esc(p.nome)}</div>${descricao}${sizes}<div class="prod-card-bottom"><div><div class="prod-price">${R(p.preco)}</div>${sold?'<span class="stock-label">Esgotado</span>':''}</div>${add}</div></div>
     </article>`;
 }
