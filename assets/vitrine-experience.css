@@ -117,3 +117,26 @@ body[data-experience="cardapio"] .cat-btn:focus-visible{outline:3px solid color-
 @media(max-width:360px){body[data-experience="cardapio"] .prod-list .prod-card:not(.featured-card){gap:.55rem;padding:.65rem}body[data-experience="cardapio"] .prod-list .prod-card:not(.featured-card) .prod-img{width:80px;height:80px}body[data-experience="cardapio"] .prod-list .prod-card:not(.featured-card) .prod-action{max-width:100%;padding:0 .65rem;white-space:normal}}
 @media(prefers-reduced-motion:reduce){body[data-experience="cardapio"] .cat-btn{scroll-behavior:auto}}
 
+
+/* Cardápio: identidade compacta; a primeira categoria deve surgir cedo. */
+body[data-experience="cardapio"] .hero.hero-empty{display:none}
+body[data-experience="cardapio"] .store-identity{padding:.85rem 1rem .7rem}
+body[data-experience="cardapio"] .info-strips{padding:.45rem 1rem .6rem}
+body[data-experience="cardapio"] .menu-category{scroll-margin-top:calc(var(--store-header-height,66px) + 78px)}
+body[data-experience="cardapio"] .prod-list{scroll-margin-top:calc(var(--store-header-height,66px) + 70px)}
+body[data-experience="cardapio"] .prod-list .prod-card:not(.featured-card) .prod-action{min-height:44px}
+body[data-experience="cardapio"] .cats{scroll-padding-inline:16px}
+body[data-experience="cardapio"] .cat-btn[aria-pressed="true"]{background:var(--p);border-color:var(--p);color:#fff}
+body[data-experience="cardapio"] .prod-list .prod-card:not(.featured-card) .prod-img img{width:100%;height:100%;object-fit:cover}
+body[data-experience="cardapio"] .prod-list .prod-card:not(.featured-card) .prod-body{min-width:0;flex:1}
+@media(max-width:759px){
+ body[data-experience="cardapio"] .hero:not(.hero-empty){height:110px}
+ body[data-experience="cardapio"] .info-strip{padding:.35rem .2rem}
+ body[data-experience="cardapio"] .menu-category h2{font-size:1rem}
+ body[data-experience="cardapio"] .cart-nav-meta{max-width:115px;font-size:.55rem}
+}
+@media(max-width:370px){
+ body[data-experience="cardapio"] .cart-nav-meta{max-width:90px}
+ body[data-experience="cardapio"] .prod-card-bottom{align-items:flex-start;flex-direction:column}
+ body[data-experience="cardapio"] .prod-action{width:100%;white-space:normal;line-height:1.2}
+}
