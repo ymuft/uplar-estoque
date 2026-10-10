@@ -1107,9 +1107,17 @@ const COMMON_SIZES=['PP','P','M','G','GG','XG','XXG'];
 function renderSizeEditor(){
     const enabled = $('sizeYes').classList.contains('on');
 
+    // Em produtos com tamanhos o agregado é apenas leitura: nenhuma unidade
+    // deve ser atribuída automaticamente à primeira variação.
     $('pQtd').disabled=false;
-    $('qsMinus').disabled=false;
-    $('qsPlus').disabled=false;
+    $('pQtd').readOnly=enabled;
+    $('pQtd').setAttribute('aria-readonly',String(enabled));
+    $('qsMinus').disabled=enabled;
+    $('qsPlus').disabled=enabled;
+    $('stockQuantityLabel').textContent=enabled?'Estoque total dos tamanhos':(editId?'Quantidade em estoque':'Quantidade inicial em estoque');
+    $('stockQuantityHint').textContent=enabled
+        ?'Total calculado pelas quantidades de cada tamanho. Edite os tamanhos abaixo para ajustar.'
+        :'Informe a quantidade disponível deste produto.';
 
     $('sizeEditor').hidden=!enabled;
 
@@ -1142,14 +1150,6 @@ function renderSizeTotal(){
     $('pQtd').value=total;
 }
 
-function applyAggregateStock(target){
-    target=Math.max(0,Math.floor(Number(target)||0));
-    const current=sizeDraft.reduce((n,s)=>n+Math.max(0,Number(s.quantidade)||0),0),difference=target-current;
-    if(!difference||!sizeDraft.length)return;
-    if(difference>0){sizeDraft[0].quantidade=(Number(sizeDraft[0].quantidade)||0)+difference;return;}
-    let remaining=Math.abs(difference);
-    [...sizeDraft].reverse().forEach(size=>{const available=Math.max(0,Number(size.quantidade)||0),remove=Math.min(available,remaining);size.quantidade=available-remove;remaining-=remove;});
-}
 
 function addSize(name){
     name=String(name||'').trim().toUpperCase();
@@ -1180,12 +1180,22 @@ function sizesSuggestionUse(sizes){
 }
 
 $('sizeYes').addEventListener('click',()=>{
+    const original=editId?estoque.find(p=>Number(p.id)===Number(editId)):null;
+    if(original&&!productUsesSizes(original)&&Number(original.quantidade)>0){
+        toast('Este produto já tem estoque. Use a opção Configurar tamanhos no menu do produto para distribuir as unidades sem perda.','warn',5500);
+        return;
+    }
     $('sizeYes').classList.add('on');
     $('sizeNo').classList.remove('on');
     renderSizeEditor();
 });
 
 $('sizeNo').addEventListener('click',()=>{
+    const original=editId?estoque.find(p=>Number(p.id)===Number(editId)):null;
+    if(original&&productUsesSizes(original)){
+        toast('O produto já utiliza tamanhos. Ajuste as quantidades por tamanho; remover o controle requer conversão específica.','warn',5500);
+        return;
+    }
     sizeDraft=[];
     $('sizeNo').classList.add('on');
     $('sizeYes').classList.remove('on');
@@ -1321,7 +1331,7 @@ function openM(p=null){
     editId=p?.id??null;
     const hasStructuredSizes=productUsesSizes(p);
     $('stockQuantityLabel').textContent=editId?'Quantidade em estoque':'Quantidade inicial em estoque';
-    $('stockQuantityHint').textContent=hasStructuredSizes?'Altere o total para uma reposição rápida; a diferença vai para a primeira variação ativa.':'Altere a quantidade para registrar uma reposição deste produto.';
+    $('stockQuantityHint').textContent=hasStructuredSizes?'O total é calculado pelos tamanhos. Edite cada quantidade individualmente.':'Informe a quantidade disponível deste produto.';
     $('pNome').value=p?.nome??'';
     $('pCod').value=p?.codigo??'';
     $('pPreco').value=p?Number(p.preco).toFixed(2):'';
@@ -1435,10 +1445,12 @@ function openProductActions(event,id){
     const anchor=event.currentTarget,p=estoque.find(item=>Number(item.id)===Number(id)),popover=$('productActionPopover');if(!p)return;
     if(productActionAnchor===anchor&&!popover.hidden){closeProductActions();return}
     closeProductActions();productActionAnchor=anchor;anchor.setAttribute('aria-expanded','true');
-    popover.innerHTML=`<button type="button" data-action="edit">Editar</button><button type="button" data-action="complements">Gerenciar complementos</button><button type="button" data-action="stock">${productUsesSizes(p)?'Atualizar tamanhos':'Ajustar estoque'}</button><button type="button" data-action="duplicate">Duplicar</button><hr><button class="danger" type="button" data-action="delete">Excluir</button>`;
+    popover.innerHTML=`<button type="button" data-action="edit">Editar</button><button type="button" data-action="complements">Gerenciar complementos</button><button type="button" data-action="stock">${productUsesSizes(p)?'Atualizar tamanhos':'Ajustar estoque'}</button>${!productUsesSizes(p)?'<button type="button" data-action="setup-sizes">Configurar tamanhos</button>':''}<button type="button" data-action="duplicate">Duplicar</button><hr><button class="danger" type="button" data-action="delete">Excluir</button>`;
     popover.querySelector('[data-action="edit"]').onclick=()=>{closeProductActions();editProduct(id)};
     popover.querySelector('[data-action="complements"]').onclick=()=>{window.location.href=`complementos.php?produto_id=${encodeURIComponent(id)}`};
     popover.querySelector('[data-action="stock"]').onclick=()=>{closeProductActions();productUsesSizes(p)?openSizeStock(id):openAggregateStockEdit(id)};
+    const setupSizes=popover.querySelector('[data-action="setup-sizes"]');
+    if(setupSizes)setupSizes.onclick=()=>{closeProductActions();openSizeStock(id)};
     popover.querySelector('[data-action="duplicate"]').onclick=()=>{closeProductActions();duplicateProd(id)};
     popover.querySelector('[data-action="delete"]').onclick=()=>{closeProductActions();delProd(id,p.nome||'')};
     popover.hidden=false;requestAnimationFrame(positionProductActions);
@@ -1553,7 +1565,7 @@ async function saveProduct(){
     if(editId!==null&&!wasEditing){toast('Reabra o produto pela lista para continuar a edição.','err');return;}
     const acao=wasEditing?'editar':'adicionar';
     let productPersisted=false;
-    if(sizeDraft.length)applyAggregateStock($('pQtd').value);
+    // Quantidade consolidada é derivada exclusivamente dos tamanhos.
     const fd=new FormData();
     fd.append('id',editId??'');
     fd.append('nome',$('pNome').value.trim());
