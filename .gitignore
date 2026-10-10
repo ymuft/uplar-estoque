@@ -1,0 +1,4 @@
+
+# Arquivos de ambiente nunca versionados, inclusive dentro de subpastas
+**/.env*
+**/.udrop_sso_secret

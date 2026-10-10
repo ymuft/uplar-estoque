@@ -1,0 +1,49 @@
+Options -Indexes
+Options +FollowSymLinks
+
+RewriteEngine On
+RewriteBase /
+
+# OpenLiteSpeed does not enforce Apache <Files> access controls.
+RewriteRule ^\.udrop_sso_secret$ - [F,L]
+
+# Bloqueia arquivos de ambiente e credenciais.
+<FilesMatch "^\.env(?:\.|$)">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>
+
+# --- Segurança: bloqueia arquivos sensíveis ---
+RewriteRule ^(security\.log|db\.php|helpers\.php|subscription\.php|login_logger\.php|site_pro_helpers\.php)$ - [F,L]
+
+# --- URL canônica: /login.php → /login ---
+# Somente GET/HEAD de páginas. APIs, actions, webhooks e formulários POST continuam no arquivo real.
+RewriteCond %{REQUEST_METHOD} ^(GET|HEAD)$ [NC]
+RewriteCond %{THE_REQUEST} \s/+[a-zA-Z0-9_-]+\.php(?:[?\s]) [NC]
+RewriteCond %{REQUEST_URI} !/(api|[a-zA-Z0-9_-]+_(api|action|webhook|logger))\.php [NC]
+RewriteRule ^([a-zA-Z0-9_-]+)\.php$ $1 [R=301,L,NE]
+
+# --- Se o arquivo/diretório já existe, serve direto ---
+RewriteCond %{REQUEST_FILENAME} -f [OR]
+RewriteCond %{REQUEST_FILENAME} -d
+RewriteRule ^ - [L]
+
+# --- Remove .php da URL (ex: /login → login.php) ---
+RewriteCond %{REQUEST_FILENAME}.php -f
+RewriteRule ^([a-zA-Z0-9_-]+)/?$ $1.php [NC,L,QSA]
+
+# Segredo compartilhado para autorizar uploads autenticados do uDrop.
+<Files ".udrop_sso_secret">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</Files>

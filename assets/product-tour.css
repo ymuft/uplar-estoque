@@ -1,0 +1,13 @@
+.driver-popover.uplar-tour-popover{width:min(360px,calc(100vw - 28px));padding:1rem;background:var(--card,#fff);color:var(--ink,#0f1c2e);border:1px solid var(--border,#e4eaf2);border-radius:12px;box-shadow:0 18px 50px rgba(15,28,46,.24);font-family:inherit}
+.uplar-tour-popover .driver-popover-title{font-size:.98rem;font-weight:800;letter-spacing:-.02em;color:var(--ink,#0f1c2e)}
+.uplar-tour-popover .driver-popover-description{margin-top:.3rem;color:var(--muted,#5a6a7a);font-size:.76rem;line-height:1.5}
+.uplar-tour-popover .driver-popover-progress-text{color:var(--p,#3b6ff5);font-size:.64rem;font-weight:800}
+.uplar-tour-popover .driver-popover-footer{align-items:center;gap:.45rem;margin-top:1rem}
+.uplar-tour-popover .driver-popover-navigation-btns{gap:.45rem}
+.uplar-tour-popover .driver-popover-btn{min-height:36px;padding:.45rem .7rem;border:1px solid var(--border,#e4eaf2);border-radius:8px;background:var(--card,#fff);color:var(--muted,#5a6a7a);font:inherit;font-size:.71rem;font-weight:750;text-shadow:none;transition:background .18s,border-color .18s,color .18s,transform .18s}
+.uplar-tour-popover .driver-popover-btn:hover{border-color:rgba(59,111,245,.4);color:var(--p,#3b6ff5);background:var(--p-dim,rgba(59,111,245,.08));transform:translateY(-1px)}
+.uplar-tour-popover .driver-popover-next-btn{border-color:var(--p,#3b6ff5);background:var(--p,#3b6ff5);color:#fff}.uplar-tour-popover .driver-popover-next-btn:hover{border-color:var(--p-dark,#2a55d9);background:var(--p-dark,#2a55d9);color:#fff}
+.uplar-tour-skip{min-height:30px;padding:.3rem .45rem;border:0;border-radius:7px;background:transparent;color:var(--faint,#94a3b8);font:inherit;font-size:.67rem;font-weight:650;white-space:nowrap}.uplar-tour-skip:hover{background:var(--bg,#f4f6fb);color:var(--muted,#5a6a7a)}
+.uplar-tour-popover .driver-popover-close-btn{color:var(--faint,#94a3b8)}.uplar-tour-popover .driver-popover-close-btn:hover{color:var(--muted,#5a6a7a)}
+@media(max-width:600px){.driver-popover.uplar-tour-popover{width:calc(100vw - 24px);padding:.95rem}.uplar-tour-popover .driver-popover-footer{align-items:flex-end}.uplar-tour-popover .driver-popover-btn{min-height:40px}}
+@media(prefers-reduced-motion:reduce){.driver-popover.uplar-tour-popover{animation:none!important}}
