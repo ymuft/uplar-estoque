@@ -52,7 +52,7 @@ function uplar_vitrine_experience_json_com_modo($experienciaJson, string $modo):
 /** Preferences affect presentation and enabled service choices, never prices. */
 function uplar_vitrine_experience_defaults(): array {
     return ['modo'=>'padrao','categorias'=>[],'mostrar_destaques'=>true,'indisponiveis'=>'ocultar',
-        'entrega_habilitada'=>true,'retirada_habilitada'=>true,'pedidos_habilitados'=>true];
+        'entrega_habilitada'=>true,'retirada_habilitada'=>true,'pedidos_habilitados'=>true,'fonte_categorias'=>'legado'];
 }
 
 function uplar_vitrine_experience_validate(array $values): array {
@@ -63,6 +63,7 @@ function uplar_vitrine_experience_validate(array $values): array {
     }
     if(array_key_exists('modo',$values)&&!in_array($values['modo'],['padrao','loja','cardapio'],true))throw new InvalidArgumentException('Modo de experiência inválido.');
     if(array_key_exists('indisponiveis',$values)&&!in_array($values['indisponiveis'],['mostrar','ocultar'],true))throw new InvalidArgumentException('Exibição de produtos indisponíveis inválida.');
+    if(array_key_exists('fonte_categorias',$values)&&!in_array($values['fonte_categorias'],['legado','canonico'],true))throw new InvalidArgumentException('Origem das categorias inválida.');
     if(array_key_exists('categorias',$values)){
         if(!is_array($values['categorias'])||!array_is_list($values['categorias'])||count($values['categorias'])>40)throw new InvalidArgumentException('Configure até 40 categorias.');
         $seenCategories=[];$seenProducts=[];$categories=[];
