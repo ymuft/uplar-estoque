@@ -1061,7 +1061,7 @@ const STEPS=[
     {id:6,title:'Confirmar e salvar',sub:'Revise os dados antes de salvar'},
 ];
 let curStep=1,activeStepId=1,editId=null;
-let sizeDraft=[];
+let sizeDraft=[],stockBeforeSizeChoice=0;
 let complementsEditor=null;
 let customizationEnabled=false,customizationChoiceExplicit=false,customizationDisableConfirmed=false;
 let wizardBaseline='',skipWizardLeaveWarning=false,wizardFieldsDirty=false;
@@ -1169,7 +1169,9 @@ function renderSizeEditor(){
 function renderSizeTotal(){
     const total=sizeDraft.reduce((n,s)=>n+Math.max(0,Number(s.quantidade)||0),0);
     $('sizeTotal').textContent=`Estoque total: ${total} unidades`;
-    $('pQtd').value=total;
+    // Ao abrir/editar um produto comum, preservar a quantidade existente.
+    // O agregado só deve refletir os tamanhos quando o controle estiver ativo.
+    if($('sizeYes').classList.contains('on'))$('pQtd').value=total;
 }
 
 
@@ -1207,6 +1209,7 @@ $('sizeYes').addEventListener('click',()=>{
         toast('Este produto já tem estoque. Use a opção Configurar tamanhos no menu do produto para distribuir as unidades sem perda.','warn',5500);
         return;
     }
+    if(!$('sizeYes').classList.contains('on'))stockBeforeSizeChoice=Math.max(0,Number($('pQtd').value)||0);
     $('sizeYes').classList.add('on');
     $('sizeNo').classList.remove('on');
     renderSizeEditor();
@@ -1219,10 +1222,12 @@ $('sizeNo').addEventListener('click',()=>{
         toast('O produto já utiliza tamanhos. Ajuste as quantidades por tamanho; remover o controle requer conversão específica.','warn',5500);
         return;
     }
+    const wasEnabled=$('sizeYes').classList.contains('on');
     sizeDraft=[];
     $('sizeNo').classList.add('on');
     $('sizeYes').classList.remove('on');
     renderSizeEditor();
+    if(wasEnabled)$('pQtd').value=stockBeforeSizeChoice;
     updateQuickSaveVisibility();
 });
 
@@ -1366,6 +1371,7 @@ function openM(p=null){
     $('pPreco').value=p?Number(p.preco).toFixed(2):'';
     $('pCusto').value=p?Number(p.preco_custo||0).toFixed(2):'';
     $('pQtd').value=p?.quantidade??1;
+    stockBeforeSizeChoice=Math.max(0,Number($('pQtd').value)||0);
     $('pDesc').value=p?.descricao??'';
     categoriaSelecionada=p?.categoria_id?Number(p.categoria_id):null;
     if(categoriasDisponiveis.length)renderCategoriasProduto();else carregarCategoriasProduto();
