@@ -42,6 +42,7 @@ try {
         'status_configuracao' => $status,
         'segmento' => $segment,
         'categorias_pendentes' => $categories,
+        'categorias_definidas' => ($_POST['categorias_definidas'] ?? '') === '1',
         'aplicar_modo' => ($_POST['aplicar_modo'] ?? '') === '1',
         'entrega' => ($_POST['entrega'] ?? '') === '1',
         'retirada' => ($_POST['retirada'] ?? '') === '1',
