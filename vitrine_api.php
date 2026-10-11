@@ -18,6 +18,7 @@ require __DIR__ . '/includes/vitrine_featured.php';
 require_once __DIR__ . '/includes/vitrine_experience.php';
 require_once __DIR__ . '/includes/catalog_categories.php';
 require_once __DIR__ . '/includes/commercial_origin.php';
+require_once __DIR__ . '/includes/commercial_availability.php';
 require_once __DIR__ . '/includes/product_sizes.php';
 require_once __DIR__ . '/includes/product_complements.php';
 
@@ -331,6 +332,12 @@ case 'get_config':
     $s->execute([(int)$user['id']]);
     $cfg = $s->fetch(PDO::FETCH_ASSOC) ?: [];
     $experiencePreferences = uplar_catalogo_public_prefs($pdo, (int)$user['id'], uplar_vitrine_experience_preferences($cfg['experiencia_json'] ?? null));
+    $atendimentoOperacao = uplar_storefront_schedule_preferences($cfg['experiencia_json'] ?? null);
+    $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
+    $estadoAtendimento = [
+        'retirada' => uplar_commercial_availability_service_state($atendimentoOperacao, 'retirada', $now),
+        'entrega' => uplar_commercial_availability_service_state($atendimentoOperacao, 'entrega', $now),
+    ];
 
     apiok([
         'user_id'         => (int)$user['id'],
@@ -349,6 +356,8 @@ case 'get_config':
         'valor_frete'     => (float)($cfg['valor_frete'] ?? 0),
         'modo_experiencia'=> uplar_vitrine_experience_mode($cfg['experiencia_json'] ?? null),
         'preferencias_experiencia' => $experiencePreferences,
+        'atendimento_operacao' => $atendimentoOperacao,
+        'estado_atendimento' => $estadoAtendimento,
     ]);
     break;
 
@@ -370,10 +379,19 @@ case 'listar_produtos':
 
     // Filtra apenas produtos marcados como vitrine_exposto = 1
     $highlightValue = $showHighlights ? "COALESCE(p.vitrine_destaque, 'none')" : "'none'";
-    $sql    = "SELECT p.id, p.nome, p.codigo, p.descricao, p.preco, p.quantidade, p.imagem, p.usa_tamanhos,
+    $availabilitySchemaReady = uplar_commercial_availability_schema_ready($pdo);
+    $availabilitySelect = uplar_commercial_availability_product_select($pdo, 'p');
+    $availabilityWhere = '';
+    if (!$showUnavailable) {
+        $availabilityWhere = $availabilitySchemaReady
+            ? " AND COALESCE(p.disponibilidade_manual, 1) = 1 AND (COALESCE(p.modo_disponibilidade, 'estoque') = 'sob_demanda' OR p.quantidade > 0)"
+            : ' AND p.quantidade > 0';
+    }
+    $sql    = "SELECT p.id, p.nome, p.codigo, p.descricao, p.preco, p.quantidade, p.imagem, p.usa_tamanhos
+                      {$availabilitySelect},
                       {$highlightValue} AS vitrine_destaque
                FROM produtos p
-               WHERE p.user_id = ? AND p.vitrine_exposto = 1" . ($showUnavailable ? '' : ' AND p.quantidade > 0');
+               WHERE p.user_id = ? AND p.vitrine_exposto = 1" . $availabilityWhere;
     $params = [(int)$user['id']];
 
     if ($busca !== '') {
@@ -410,22 +428,40 @@ case 'listar_produtos':
 
     $sizeStmt=$pdo->prepare('SELECT tamanho,quantidade,ordem,ativo FROM produto_tamanhos WHERE produto_id=? AND ativo=1 ORDER BY ordem,id');
 
-    foreach ($produtos as &$p) {
+    $produtosPublicos = [];
+    foreach ($produtos as $p) {
         $p['id']    = (int)$p['id'];
         $p['preco'] = (float)$p['preco'];
-        $p['estoque_disponivel'] = (int)$p['quantidade'];
-        $p['disponivel'] = $p['estoque_disponivel'] > 0;
         $p['categoria_id'] = $productCategories[$p['id']]['categoria_id'] ?? null;
         $p['categoria_nome'] = $productCategories[$p['id']]['categoria_nome'] ?? null;
         $p['usa_tamanhos'] = (bool)$p['usa_tamanhos'];
         $p['tem_complementos'] = isset($customizableProducts[$p['id']]);
         $p['tamanhos'] = [];
-        if($p['usa_tamanhos']){$sizeStmt->execute([$p['id']]);$p['tamanhos']=$sizeStmt->fetchAll(PDO::FETCH_ASSOC);foreach($p['tamanhos'] as &$size){$size['quantidade']=(int)$size['quantidade'];}unset($size);}
+        $p = uplar_commercial_availability_normalize_product($p);
+        $p['disponibilidade_modo'] = $p['disponibilidade_modo'];
+        $p['disponibilidade_manual'] = (bool)$p['disponibilidade_manual'];
+        if ($p['usa_tamanhos']) {
+            $sizeStmt->execute([$p['id']]);
+            foreach ($sizeStmt->fetchAll(PDO::FETCH_ASSOC) as $size) {
+                $size['quantidade'] = (int)$size['quantidade'];
+                $sizeAvailability = uplar_commercial_availability_evaluate_product($p, (string)$size['tamanho'], $size['quantidade'], (int)$p['quantidade']);
+                $size['disponivel'] = (bool)$sizeAvailability['available'];
+                $size['estoque_disponivel'] = $sizeAvailability['stock_limited'] ? (int)$sizeAvailability['stock'] : null;
+                $p['tamanhos'][] = $size;
+            }
+            $p['disponivel'] = (bool)array_filter($p['tamanhos'], static fn(array $size): bool => !empty($size['disponivel']));
+        } else {
+            $availability = uplar_commercial_availability_evaluate_product($p, null, null, (int)$p['quantidade']);
+            $p['disponivel'] = (bool)$availability['available'];
+        }
+        $p['estoque_disponivel'] = $p['disponibilidade_modo'] === 'estoque' ? (int)$p['quantidade'] : null;
         $p['vitrine_destaque'] = in_array($p['vitrine_destaque'], ['featured', 'promotion'], true) ? $p['vitrine_destaque'] : 'none';
         if (!$mostrar_est) unset($p['quantidade']);
         else $p['quantidade'] = (int)$p['quantidade'];
+        if (!$showUnavailable && !$p['disponivel']) continue;
+        $produtosPublicos[] = $p;
     }
-    unset($p);
+    $produtos = $produtosPublicos;
 
     apiok(['produtos' => $produtos, 'total' => count($produtos)]);
     break;
@@ -466,10 +502,27 @@ case 'produto_complementos':
     $productId = (int)($_GET['produto_id'] ?? 0);
     $user = resolveUser($pdo, $slug);
     if (!$user || !(int)$user['vitrine_ativa']) apierr('Vitrine não encontrada', 404);
-    $productStmt = $pdo->prepare('SELECT id, usa_tamanhos FROM produtos WHERE id = ? AND user_id = ? AND quantidade > 0 AND vitrine_exposto = 1 LIMIT 1');
+    $availabilitySelect = uplar_commercial_availability_product_select($pdo, 'p');
+    $productStmt = $pdo->prepare("SELECT p.id, p.quantidade, p.usa_tamanhos {$availabilitySelect}
+        FROM produtos p WHERE p.id = ? AND p.user_id = ? AND p.vitrine_exposto = 1 LIMIT 1");
     $productStmt->execute([$productId, (int)$user['id']]);
     $product = $productStmt->fetch(PDO::FETCH_ASSOC);
     if (!$product) apierr('Produto indisponível', 404);
+    $sizes = product_sizes_list($pdo, $productId, true);
+    if ((int)$product['usa_tamanhos']) {
+        $hasAvailableSize = false;
+        foreach ($sizes as &$size) {
+            $availability = uplar_commercial_availability_evaluate_product($product, (string)$size['tamanho'], (int)$size['quantidade'], (int)$product['quantidade']);
+            $size['disponivel'] = (bool)$availability['available'];
+            $size['estoque_disponivel'] = $availability['stock_limited'] ? (int)$availability['stock'] : null;
+            $hasAvailableSize = $hasAvailableSize || $size['disponivel'];
+        }
+        unset($size);
+        if (!$hasAvailableSize) apierr('Produto indisponível', 404);
+    } else {
+        $availability = uplar_commercial_availability_evaluate_product($product, null, null, (int)$product['quantidade']);
+        if (!$availability['available']) apierr('Produto indisponível', 404);
+    }
     $groups = $complementsReady ? uplar_complementos_publicar_grupos(uplar_complementos_listar($pdo, (int)$user['id'], $productId)) : [];
     apiok([
         'configurado' => (bool)$groups,
@@ -478,7 +531,9 @@ case 'produto_complementos':
         'tamanhos' => array_map(static fn($size) => [
             'tamanho' => (string)$size['tamanho'],
             'quantidade' => (int)$size['quantidade'],
-        ], product_sizes_list($pdo, $productId, true)),
+            'disponivel' => (bool)($size['disponivel'] ?? true),
+            'estoque_disponivel' => $size['estoque_disponivel'] ?? (int)$size['quantidade'],
+        ], $sizes),
     ]);
     break;
 
@@ -601,17 +656,23 @@ case 'carrinho_add':
 
     vitrineRequireOrderingEnabled(vitrineExperiencePreferences($pdo, (int)$user['id']));
 
-    $ps = $pdo->prepare("SELECT id, quantidade, preco, usa_tamanhos FROM produtos WHERE id = ? AND user_id = ? AND quantidade > 0 AND vitrine_exposto = 1 LIMIT 1");
+    $availabilitySelect = uplar_commercial_availability_product_select($pdo, 'p');
+    $ps = $pdo->prepare("SELECT p.id, p.quantidade, p.preco, p.usa_tamanhos {$availabilitySelect}
+        FROM produtos p WHERE p.id = ? AND p.user_id = ? AND p.vitrine_exposto = 1 LIMIT 1");
     $ps->execute([$produto_id, (int)$user['id']]);
     $prod = $ps->fetch(PDO::FETCH_ASSOC);
     if (!$prod) apierr('Produto indisponível');
     $tamanho = $tamanhoRaw !== '' ? product_sizes_normalize($tamanhoRaw) : null;
-    $estoque=(int)$prod['quantidade'];
+    $estoqueVariante = null;
     if((int)$prod['usa_tamanhos']){
         if($tamanho===null) apierr('Escolha um tamanho.');
-        $vs=$pdo->prepare('SELECT quantidade FROM produto_tamanhos WHERE produto_id=? AND tamanho=? AND ativo=1 LIMIT 1');$vs->execute([$produto_id,$tamanho]);$estoque=(int)$vs->fetchColumn();
-        if($estoque<1) apierr('Tamanho indisponível.');
+        $vs=$pdo->prepare('SELECT quantidade FROM produto_tamanhos WHERE produto_id=? AND tamanho=? AND ativo=1 LIMIT 1');$vs->execute([$produto_id,$tamanho]);
+        $rawStock = $vs->fetchColumn();
+        $estoqueVariante = $rawStock === false ? null : (int)$rawStock;
     } elseif($tamanho!==null) apierr('Este produto não possui tamanhos.');
+    $availability = uplar_commercial_availability_evaluate_product($prod, $tamanho, $estoqueVariante, (int)$prod['quantidade']);
+    if (!$availability['available']) apierr('Produto indisponível.', 409);
+    $estoque = $availability['stock_limited'] ? (int)$availability['stock'] : null;
 
     $submittedGroups = json_decode((string)($_POST['personalizacao'] ?? '[]'), true);
     if (!is_array($submittedGroups)) apierr('Personalização inválida.');
@@ -635,16 +696,19 @@ case 'carrinho_add':
     $existing = $es->fetch(PDO::FETCH_ASSOC);
 
     if ($existing) {
-        $nova_qtd = min((int)$existing['quantidade'] + $qtd, $estoque);
+        $nova_qtd = $availability['stock_limited']
+            ? min((int)$existing['quantidade'] + $qtd, (int)$estoque)
+            : (int)$existing['quantidade'] + $qtd;
         $pdo->prepare("UPDATE vitrine_carrinho SET quantidade = ? WHERE id = ?")
             ->execute([$nova_qtd, (int)$existing['id']]);
     } else {
+        $quantidadeCarrinho = $availability['stock_limited'] ? min($qtd, (int)$estoque) : $qtd;
         if ($complementsReady) {
             $pdo->prepare("INSERT INTO vitrine_carrinho (sessao, user_id, produto_id, tamanho, quantidade, personalizacao_hash, personalizacao_json) VALUES (?,?,?,?,?,?,?)")
-                ->execute([$sess, (int)$user['id'], $produto_id, $tamanho, min($qtd, $estoque), $personalizationHash, $hasPersonalization ? json_encode($personalization, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null]);
+                ->execute([$sess, (int)$user['id'], $produto_id, $tamanho, $quantidadeCarrinho, $personalizationHash, $hasPersonalization ? json_encode($personalization, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null]);
         } else {
             $pdo->prepare("INSERT INTO vitrine_carrinho (sessao, user_id, produto_id, tamanho, quantidade) VALUES (?,?,?,?,?)")
-                ->execute([$sess, (int)$user['id'], $produto_id, $tamanho, min($qtd, $estoque)]);
+                ->execute([$sess, (int)$user['id'], $produto_id, $tamanho, $quantidadeCarrinho]);
         }
     }
 
@@ -690,7 +754,9 @@ case 'carrinho_editar':
             apierr('O item não está mais no seu carrinho. Atualize a página e tente novamente.', 404);
         }
 
-        $productStmt = $pdo->prepare('SELECT id, quantidade, usa_tamanhos FROM produtos WHERE id = ? AND user_id = ? AND quantidade > 0 AND vitrine_exposto = 1 LIMIT 1 FOR UPDATE');
+        $availabilitySelect = uplar_commercial_availability_product_select($pdo, 'p');
+        $productStmt = $pdo->prepare("SELECT p.id, p.quantidade, p.usa_tamanhos {$availabilitySelect}
+            FROM produtos p WHERE p.id = ? AND p.user_id = ? AND p.vitrine_exposto = 1 LIMIT 1 FOR UPDATE");
         $productStmt->execute([(int)$productId, (int)$user['id']]);
         $product = $productStmt->fetch(PDO::FETCH_ASSOC);
         if (!$product) {
@@ -698,7 +764,7 @@ case 'carrinho_editar':
             apierr('Este produto não está mais disponível nesta vitrine.', 409);
         }
 
-        $stock = (int)$product['quantidade'];
+        $variantStock = null;
         if ((int)$product['usa_tamanhos']) {
             if ($size === null) {
                 $pdo->rollBack();
@@ -706,17 +772,18 @@ case 'carrinho_editar':
             }
             $sizeStmt = $pdo->prepare('SELECT quantidade FROM produto_tamanhos WHERE produto_id = ? AND tamanho = ? AND ativo = 1 LIMIT 1 FOR UPDATE');
             $sizeStmt->execute([(int)$productId, $size]);
-            $sizeStock = $sizeStmt->fetchColumn();
-            if ($sizeStock === false || (int)$sizeStock < 1) {
-                $pdo->rollBack();
-                apierr('O tamanho escolhido não está mais disponível. Escolha outro.', 409);
-            }
-            $stock = min($stock, (int)$sizeStock);
+            $rawSizeStock = $sizeStmt->fetchColumn();
+            $variantStock = $rawSizeStock === false ? null : (int)$rawSizeStock;
         } elseif ($size !== null) {
             $pdo->rollBack();
             apierr('Este produto não possui tamanhos.', 422);
         }
-        if ($quantity > $stock) {
+        $availability = uplar_commercial_availability_evaluate_product($product, $size, $variantStock, (int)$product['quantidade']);
+        if (!$availability['available']) {
+            $pdo->rollBack();
+            apierr('Este produto ou tamanho não está mais disponível nesta vitrine.', 409);
+        }
+        if ($availability['stock_limited'] && $quantity > (int)$availability['stock']) {
             $pdo->rollBack();
             apierr('A quantidade excede o estoque disponível. Reduza a quantidade para salvar.', 409);
         }
@@ -786,13 +853,15 @@ case 'carrinho_sincronizar':
         $requested[] = [
             'produto_id' => $produtoId,
             'tamanho' => $tamanho,
-            'quantidade' => min(999, $quantidade),
+            'quantidade' => $quantidade,
             'grupos' => $selections,
             'observacao' => $itemNote,
         ];
     }
 
-    $product = $pdo->prepare('SELECT id, quantidade, preco, usa_tamanhos FROM produtos WHERE id = ? AND user_id = ? AND quantidade > 0 AND vitrine_exposto = 1 LIMIT 1');
+    $availabilitySelect = uplar_commercial_availability_product_select($pdo, 'p');
+    $product = $pdo->prepare("SELECT p.id, p.quantidade, p.preco, p.usa_tamanhos {$availabilitySelect}
+        FROM produtos p WHERE p.id = ? AND p.user_id = ? AND p.vitrine_exposto = 1 LIMIT 1");
     $variant = $pdo->prepare('SELECT quantidade FROM produto_tamanhos WHERE produto_id=? AND tamanho=? AND ativo=1');
     $preparedItems = [];
     foreach ($requested as $item) {
@@ -801,12 +870,14 @@ case 'carrinho_sincronizar':
         if (!$current) apierr('Um produto salvo no carrinho não está mais disponível. Revise o carrinho antes de continuar.', 409);
         if ((int)$current['usa_tamanhos'] && $item['tamanho'] === null) apierr('Revise os tamanhos salvos no carrinho.', 409);
         if (!(int)$current['usa_tamanhos'] && $item['tamanho'] !== null) apierr('Revise os produtos salvos no carrinho.', 409);
-        $available = (int)$current['quantidade'];
+        $variantStock = null;
         if ($item['tamanho'] !== null) {
             $variant->execute([$item['produto_id'], $item['tamanho']]);
-            $available = (int)$variant->fetchColumn();
+            $rawVariantStock = $variant->fetchColumn();
+            $variantStock = $rawVariantStock === false ? null : (int)$rawVariantStock;
         }
-        if ($available < 1 || $item['quantidade'] > $available) {
+        $availability = uplar_commercial_availability_evaluate_product($current, $item['tamanho'], $variantStock, (int)$current['quantidade']);
+        if (!$availability['available'] || ($availability['stock_limited'] && $item['quantidade'] > (int)$availability['stock'])) {
             apierr('O estoque de um item salvo no carrinho mudou. Revise o carrinho antes de continuar.', 409);
         }
         if (!$complementsReady && ($item['grupos'] || $item['observacao'] !== '')) apierr('Revise as personalizações salvas no carrinho.', 409);
@@ -822,7 +893,7 @@ case 'carrinho_sincronizar':
         $preparedItems[] = [
             'produto_id' => $item['produto_id'],
             'tamanho' => $item['tamanho'],
-            'quantidade' => min($item['quantidade'], $available),
+            'quantidade' => $item['quantidade'],
             'snapshot' => $snapshot,
             'hash' => $hasPersonalization ? uplar_complementos_hash($snapshot) : '',
         ];
@@ -869,6 +940,7 @@ case 'carrinho_get':
     $pdo->prepare("DELETE FROM vitrine_carrinho WHERE adicionado < DATE_SUB(NOW(), INTERVAL 24 HOUR)")->execute();
 
     $personalizationSelect = $complementsReady ? 'vc.personalizacao_json' : 'NULL AS personalizacao_json';
+    $availabilitySelect = uplar_commercial_availability_product_select($pdo, 'p');
 
     $st = $pdo->prepare("
         SELECT vc.id,
@@ -879,6 +951,9 @@ case 'carrinho_get':
                p.nome,
                p.preco,
                p.imagem,
+               p.quantidade            AS estoque_produto,
+               p.usa_tamanhos
+               {$availabilitySelect},
                CASE WHEN vc.tamanho IS NULL THEN p.quantidade ELSE pt.quantidade END AS estoque
         FROM vitrine_carrinho vc
         JOIN produtos p ON p.id = vc.produto_id AND p.user_id = vc.user_id
@@ -898,11 +973,19 @@ case 'carrinho_get':
     $totalCents = 0;
     $count = 0;
     $reviewRequired = false;
+    $cartReservedStock = [];
     foreach ($itens as &$i) {
         $i['produto_id']   = (int)$i['produto_id'];
         $requestedQuantity = max(1, (int)$i['qtd_carrinho']);
-        $availableStock = max(0, (int)$i['estoque']);
-        $stockStale = $requestedQuantity > $availableStock;
+        $tamanho = $i['tamanho'] !== null ? (string)$i['tamanho'] : null;
+        $variantStock = $tamanho !== null && $i['estoque'] !== null ? (int)$i['estoque'] : null;
+        $availability = uplar_commercial_availability_evaluate_product(
+            $i,
+            $tamanho,
+            $variantStock,
+            (int)$i['estoque_produto']
+        );
+        $stockStale = !$availability['available'] || !uplar_commercial_availability_reserve_quantity($cartReservedStock, (int)$i['produto_id'], $tamanho, $requestedQuantity, $availability);
         $i['qtd_carrinho'] = $requestedQuantity;
         $basePrice = (float)$i['preco'];
         $personalization = is_string($i['personalizacao_json'] ?? null)
@@ -932,11 +1015,15 @@ case 'carrinho_get':
         $i['personalizacao'] = $personalization ? uplar_complementos_publicar_snapshot($personalization) : null;
         unset($i['personalizacao_json']);
         $i['preco'] = $appliedCents / 100;
-        $i['estoque']      = $availableStock;
-        $i['tamanho']      = $i['tamanho'] !== null ? (string)$i['tamanho'] : null;
+        $i['estoque'] = $availability['stock_limited'] ? (int)$availability['stock'] : null;
+        $i['disponibilidade_modo'] = $availability['mode'];
+        $i['disponibilidade_manual'] = (bool)$i['disponibilidade_manual'];
+        $i['tamanho'] = $tamanho;
         $i['revisao_requerida'] = $stale;
         $i['aviso'] = $stockStale
-            ? 'O estoque disponível mudou. Ajuste a quantidade ou remova este item antes de finalizar.'
+            ? ($availability['reason'] === 'sem_estoque'
+                ? 'O estoque disponível mudou. Ajuste a quantidade ou remova este item antes de finalizar.'
+                : 'Este produto não está mais disponível para pedido. Remova-o antes de finalizar.')
             : ($stale ? 'Uma opção ou preço mudou. Remova e configure novamente antes de finalizar.' : null);
         $reviewRequired = $reviewRequired || $stale;
         $totalCents += $appliedCents * $i['qtd_carrinho'];
@@ -986,8 +1073,11 @@ case 'carrinho_qtd':
     if (!$user || $carrinho_id < 1) apierr('Dados inválidos');
 
     $sess  = session_id();
+    $availabilitySelect = uplar_commercial_availability_product_select($pdo, 'p');
     $check = $pdo->prepare("
-        SELECT vc.id, vc.tamanho, p.usa_tamanhos, CASE WHEN vc.tamanho IS NULL THEN p.quantidade ELSE pt.quantidade END AS estoque
+        SELECT vc.id, vc.tamanho, p.quantidade AS estoque_produto, p.usa_tamanhos
+               {$availabilitySelect},
+               CASE WHEN vc.tamanho IS NULL THEN p.quantidade ELSE pt.quantidade END AS estoque
         FROM vitrine_carrinho vc
         JOIN produtos p ON p.id = vc.produto_id AND p.user_id = vc.user_id AND p.vitrine_exposto = 1
         LEFT JOIN produto_tamanhos pt ON pt.produto_id=vc.produto_id AND pt.tamanho=vc.tamanho AND pt.ativo=1
@@ -998,12 +1088,15 @@ case 'carrinho_qtd':
     $row = $check->fetch(PDO::FETCH_ASSOC);
     if (!$row) apierr('Item não encontrado', 404);
 
-    if ((int)$row['estoque'] < 1) {
+    $tamanho = $row['tamanho'] !== null ? (string)$row['tamanho'] : null;
+    $variantStock = $tamanho !== null && $row['estoque'] !== null ? (int)$row['estoque'] : null;
+    $availability = uplar_commercial_availability_evaluate_product($row, $tamanho, $variantStock, (int)$row['estoque_produto']);
+    if (!$availability['available']) {
         $pdo->prepare('DELETE FROM vitrine_carrinho WHERE id = ?')->execute([$carrinho_id]);
         apiok(['quantidade' => 0, 'removido' => true]);
     }
 
-    $nova_qtd = min($qtd, (int)$row['estoque']);
+    $nova_qtd = $availability['stock_limited'] ? min($qtd, (int)$availability['stock']) : $qtd;
     $pdo->prepare("UPDATE vitrine_carrinho SET quantidade = ? WHERE id = ?")
         ->execute([$nova_qtd, $carrinho_id]);
     apiok(['quantidade' => $nova_qtd]);
@@ -1025,10 +1118,26 @@ case 'fazer_pedido':
     $experiencePreferences = vitrineExperiencePreferences($pdo, (int)$user['id']);
     vitrineRequireOrderingEnabled($experiencePreferences);
     vitrineRequireOrderType($experiencePreferences, $tipo);
+    $experienceJson = null;
+    if (uplar_vitrine_experience_schema_disponivel($pdo)) {
+        $experienceStmt = $pdo->prepare('SELECT experiencia_json FROM vitrine_config WHERE user_id = ? LIMIT 1');
+        $experienceStmt->execute([(int)$user['id']]);
+        $experienceJson = $experienceStmt->fetchColumn() ?: null;
+    }
+    $estadoAtendimento = uplar_commercial_availability_service_state(
+        uplar_storefront_schedule_preferences($experienceJson),
+        $tipo,
+        new DateTimeImmutable('now', new DateTimeZone('UTC'))
+    );
+    if (!$estadoAtendimento['allowed']) {
+        apierr($estadoAtendimento['message'] ?: 'Esta loja não está recebendo pedidos no momento.', 409);
+    }
     if ($tipo === 'entrega' && $endereco_ent === '') apierr('Informe o endereço de entrega');
 
     $sess  = session_id();
+    $pdo->beginTransaction();
     $personalizationSelect = $complementsReady ? 'vc.personalizacao_json' : 'NULL AS personalizacao_json';
+    $availabilitySelect = uplar_commercial_availability_product_select($pdo, 'p');
     $items = $pdo->prepare("
         SELECT vc.quantidade AS qtd,
                vc.tamanho,
@@ -1039,25 +1148,49 @@ case 'fazer_pedido':
                p.preco_custo,
                p.codigo,
                p.usa_tamanhos,
+               p.quantidade  AS estoque_produto
+               {$availabilitySelect},
                CASE WHEN vc.tamanho IS NULL THEN p.quantidade ELSE pt.quantidade END AS estoque
         FROM vitrine_carrinho vc
         JOIN produtos p ON p.id = vc.produto_id AND p.user_id = vc.user_id
         LEFT JOIN produto_tamanhos pt ON pt.produto_id=vc.produto_id AND pt.tamanho=vc.tamanho AND pt.ativo=1
         WHERE vc.sessao = ? AND vc.user_id = ?
+        FOR UPDATE
     ");
     $items->execute([$sess, (int)$user['id']]);
     $itens = $items->fetchAll(PDO::FETCH_ASSOC);
 
-    if (!$itens) apierr('Carrinho vazio');
+    if (!$itens) {
+        $pdo->rollBack();
+        apierr('Carrinho vazio');
+    }
 
     $totalCents = 0;
     $itens_out = [];
+    $reservedStock = [];
     foreach ($itens as $i) {
         if (((int)$i['usa_tamanhos'] && empty($i['tamanho'])) || (!(int)$i['usa_tamanhos'] && !empty($i['tamanho']))) {
+            $pdo->rollBack();
             apierr('Revise o tamanho ou a variação de um item do carrinho.', 409);
         }
-        $qtd_real = min((int)$i['qtd'], (int)$i['estoque']);
-        if ($qtd_real < 1 || $qtd_real < (int)$i['qtd']) apierr('O estoque mudou. Ajuste a quantidade do item antes de finalizar.', 409);
+        $tamanho = $i['tamanho'] !== null ? (string)$i['tamanho'] : null;
+        $availability = uplar_commercial_availability_evaluate_product(
+            $i,
+            $tamanho,
+            $tamanho !== null && $i['estoque'] !== null ? (int)$i['estoque'] : null,
+            (int)$i['estoque_produto']
+        );
+        if (!$availability['available']) {
+            $pdo->rollBack();
+            apierr($availability['reason'] === 'sem_estoque'
+                ? 'O estoque mudou. Ajuste a quantidade do item antes de finalizar.'
+                : 'Este produto não está mais disponível para pedido.', 409);
+        }
+        $qtd_real = (int)$i['qtd'];
+        if (!uplar_commercial_availability_reserve_quantity($reservedStock, (int)$i['pid'], $tamanho, $qtd_real, $availability)) {
+            $pdo->rollBack();
+            apierr('O estoque mudou. Ajuste a quantidade do item antes de finalizar.', 409);
+        }
         $personalization = is_string($i['personalizacao_json'] ?? null) ? json_decode($i['personalizacao_json'], true) : null;
         $personalization = is_array($personalization) ? $personalization : null;
         $validated = null;
@@ -1065,11 +1198,13 @@ case 'fazer_pedido':
             try {
                 $validated = uplar_complementos_validar($pdo, (int)$user['id'], (int)$i['pid'], vitrineComplementosInput($personalization ?? []));
             } catch (Throwable $e) {
+                $pdo->rollBack();
                 apierr('Uma personalização ou preço mudou. Remova e configure novamente os itens indicados antes de finalizar.', 409);
             }
             if ($personalization) {
                 if (json_encode($personalization['grupos'] ?? [], JSON_UNESCAPED_UNICODE) !== json_encode($validated['snapshot']['grupos'] ?? [], JSON_UNESCAPED_UNICODE)
                     || vitrineComplementosUnitCents($personalization, (float)$i['preco']) !== (int)$validated['preco_unitario_centavos']) {
+                    $pdo->rollBack();
                     apierr('Uma personalização ou preço mudou. Remova e configure novamente os itens indicados antes de finalizar.', 409);
                 }
             }
@@ -1088,7 +1223,8 @@ case 'fazer_pedido':
             'produto_id' => (int)$i['pid'],
             'nome'       => $i['nome'],
             'codigo'     => $i['codigo'] ?? '',
-            'tamanho'    => $i['tamanho'] !== null ? (string)$i['tamanho'] : null,
+            'tamanho'    => $tamanho,
+            'disponibilidade_modo' => $availability['mode'],
             'preco'      => $unitPrice,
             'quantidade' => $qtd_real,
             'subtotal'   => $sub,
@@ -1096,7 +1232,10 @@ case 'fazer_pedido':
             'observacao_item' => trim((string)($personalization['observacao'] ?? '')),
         ];
     }
-    if (!$itens_out) apierr('Nenhum item disponível em estoque');
+    if (!$itens_out) {
+        $pdo->rollBack();
+        apierr('Nenhum item disponível em estoque');
+    }
 
     $valor_frete = 0.0;
     // O valor financeiro do frete vem exclusivamente da configuração da vitrine.
@@ -1109,24 +1248,34 @@ case 'fazer_pedido':
 
     $total_com_frete = ($totalCents / 100) + ($tipo === 'entrega' ? $valor_frete : 0);
 
-    $pdo->prepare("
-        INSERT INTO vitrine_pedidos
+    try {
+        $pdo->prepare("
+            INSERT INTO vitrine_pedidos
             (user_id, origem, sessao, cliente_nome, cliente_tel, tipo_entrega, endereco_ent,
              total, valor_frete, itens_json, obs)
-        VALUES (?,'vitrine',?,?,?,?,?,?,?,?,?)
-    ")->execute([
-        (int)$user['id'],
-        $sess,
-        $nome ?: null,
-        $tel  ?: null,
-        $tipo,
-        $tipo === 'entrega' ? $endereco_ent : null,
-        round($total_com_frete, 2),
-        $tipo === 'entrega' ? round($valor_frete, 2) : 0,
-        json_encode($itens_out, JSON_UNESCAPED_UNICODE),
-        $obs  ?: null,
-    ]);
-    $pedido_id = (int)$pdo->lastInsertId();
+            VALUES (?,'vitrine',?,?,?,?,?,?,?,?,?)
+        ")->execute([
+            (int)$user['id'],
+            $sess,
+            $nome ?: null,
+            $tel  ?: null,
+            $tipo,
+            $tipo === 'entrega' ? $endereco_ent : null,
+            round($total_com_frete, 2),
+            $tipo === 'entrega' ? round($valor_frete, 2) : 0,
+            json_encode($itens_out, JSON_UNESCAPED_UNICODE),
+            $obs  ?: null,
+        ]);
+        $pedido_id = (int)$pdo->lastInsertId();
+
+        $pdo->prepare("DELETE FROM vitrine_carrinho WHERE sessao = ? AND user_id = ?")
+            ->execute([$sess, (int)$user['id']]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('Erro ao finalizar pedido da vitrine: ' . $e->getMessage());
+        apierr('Não foi possível finalizar o pedido. Tente novamente.', 500);
+    }
 
     try {
         vitrine_analytics_record($pdo, (int)$user['id'], 'order_created', [
@@ -1138,9 +1287,6 @@ case 'fazer_pedido':
     } catch (Throwable $e) {
         error_log('[vitrine analytics order] ' . $e->getMessage());
     }
-
-    $pdo->prepare("DELETE FROM vitrine_carrinho WHERE sessao = ? AND user_id = ?")
-        ->execute([$sess, (int)$user['id']]);
 
     $cfg_s = $pdo->prepare("SELECT whatsapp FROM vitrine_config WHERE user_id = ? LIMIT 1");
     $cfg_s->execute([(int)$user['id']]);
@@ -1238,11 +1384,24 @@ case 'salvar_config':
     $modoEnviado = array_key_exists('modo_experiencia', $_POST);
     $modoExperiencia = is_string($_POST['modo_experiencia'] ?? null) ? $_POST['modo_experiencia'] : '';
     $experienceOptionsPosted = array_key_exists('experiencia_opcoes', $_POST);
+    $atendimentoOperacaoEnviado = array_key_exists('atendimento_operacao', $_POST);
+    $atendimentoOperacao = null;
 
     if ($modoEnviado && !in_array($modoExperiencia, ['padrao', 'loja', 'cardapio'], true)) {
         apierr('Modo de experiência inválido.', 422);
     }
-    if (!$experienceSchemaReady && $modoEnviado && $modoExperiencia !== 'padrao') {
+    if ($atendimentoOperacaoEnviado) {
+        if (!is_string($_POST['atendimento_operacao'])) {
+            apierr('Os horários de atendimento são inválidos.', 422);
+        }
+        try {
+            $atendimentoOperacao = json_decode($_POST['atendimento_operacao'], true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $e) {
+            apierr('Os horários de atendimento são inválidos.', 422);
+        }
+        if (!is_array($atendimentoOperacao)) apierr('Os horários de atendimento são inválidos.', 422);
+    }
+    if (!$experienceSchemaReady && (($modoEnviado && $modoExperiencia !== 'padrao') || $atendimentoOperacaoEnviado)) {
         apierr('A experiência selecionada exige a atualização da configuração da vitrine.', 409);
     }
     $experienciaJson = null;
@@ -1267,6 +1426,9 @@ case 'salvar_config':
             } else {
                 $experienciaJson = ($cfgAtual['experiencia_json'] ?? null) ?: uplar_vitrine_experience_json_com_modo(null, 'padrao');
             }
+            if ($atendimentoOperacaoEnviado) {
+                $experienciaJson = uplar_storefront_schedule_merge_json($experienciaJson, $atendimentoOperacao);
+            }
             if ($experienceOptionsPosted) {
                 $savedPreferences = uplar_vitrine_experience_preferences($experienciaJson);
                 $assignedIds = [];
@@ -1288,7 +1450,7 @@ case 'salvar_config':
         } catch (InvalidArgumentException $e) {
             apierr($e->getMessage() ?: 'As opções da experiência são inválidas.', 422);
         }
-    } elseif ($experienceOptionsPosted) {
+    } elseif ($experienceOptionsPosted || $atendimentoOperacaoEnviado) {
         apierr('As opções da experiência exigem a atualização da configuração da vitrine.', 409);
     }
 
@@ -1438,97 +1600,116 @@ case 'pedido_status':
     if (!in_array($status, ['pendente','confirmado','cancelado'], true)) apierr('Status inválido');
     if (in_array($status, ['confirmado', 'cancelado'], true)) requireOrderPasscode($pdo, $uid);
 
-    $stmt_ped = $pdo->prepare("SELECT * FROM vitrine_pedidos WHERE id = ? AND user_id = ? LIMIT 1");
-    $stmt_ped->execute([$pid, $uid]);
-    $pedido = $stmt_ped->fetch(PDO::FETCH_ASSOC);
-    if (!$pedido) apierr('Pedido não encontrado', 404);
-
-    $status_anterior = $pedido['status'];
-    $origem_pedido = commercial_origin_normalize($pedido['origem'] ?? null);
-
-    $pdo->prepare("UPDATE vitrine_pedidos SET status = ? WHERE id = ? AND user_id = ?")
-        ->execute([$status, $pid, $uid]);
-
-    $warning = null;
-    if ($status === 'confirmado' && $status_anterior !== 'confirmado') {
-
-        $check_dup = $pdo->prepare("SELECT COUNT(*) FROM vendas WHERE pedido_vitrine_id = ?");
-        $check_dup->execute([$pid]);
-
-        if ((int)$check_dup->fetchColumn() === 0) {
-            $itens = json_decode($pedido['itens_json'], true) ?? [];
-
-            if (!empty($itens)) {
-                try {
-                    $pdo->beginTransaction();
-
-                    foreach ($itens as $item) {
-                        $produto_id = (int)($item['produto_id'] ?? 0);
-                        $quantidade = (int)($item['quantidade'] ?? 0);
-                        $preco      = (float)($item['preco']    ?? 0);
-                        $tamanho    = isset($item['tamanho']) && $item['tamanho'] !== null && $item['tamanho'] !== '' ? product_sizes_normalize($item['tamanho']) : null;
-
-                        if ($produto_id < 1 || $quantidade < 1 || $preco <= 0) continue;
-
-                        $stmt_prod = $pdo->prepare("SELECT id, quantidade, preco_custo, usa_tamanhos FROM produtos WHERE id = ? AND user_id = ? FOR UPDATE");
-                        $stmt_prod->execute([$produto_id, $uid]);
-                        $produto = $stmt_prod->fetch(PDO::FETCH_ASSOC);
-                        if (!$produto) continue;
-                        if ((int)$produto['usa_tamanhos'] && $tamanho === null) continue;
-                        if (!(int)$produto['usa_tamanhos'] && $tamanho !== null) continue;
-                        if ($tamanho !== null) {
-                            $deduct=$pdo->prepare('UPDATE produto_tamanhos SET quantidade=quantidade-? WHERE produto_id=? AND tamanho=? AND ativo=1 AND quantidade>=?');
-                            $deduct->execute([$quantidade,$produto_id,$tamanho,$quantidade]);
-                            if($deduct->rowCount()!==1) continue;
-                            product_sizes_sync_total($pdo,$produto_id,$uid);
-                        } elseif ((int)$produto['quantidade'] < $quantidade) continue;
-
-                        $obs_venda = "Pedido vitrine #$pid"
-                            . ($pedido['cliente_nome'] ? " — {$pedido['cliente_nome']}" : '')
-                            . ($pedido['tipo_entrega'] === 'entrega' ? ' (entrega)' : ' (retirada)');
-                        $customization = is_array($item['personalizacao'] ?? null) ? $item['personalizacao'] : null;
-                        $baseCostCents = is_numeric($customization['custo_base_centavos'] ?? null)
-                            ? (int)$customization['custo_base_centavos']
-                            : (int)round((float)$produto['preco_custo'] * 100);
-                        $additionalCostCents = is_numeric($customization['custo_adicional_centavos'] ?? null)
-                            ? (int)$customization['custo_adicional_centavos']
-                            : 0;
-                        $costComplete = $baseCostCents > 0 && (!$customization || !empty($customization['custos_completos']));
-                        $unitCost = ($baseCostCents + $additionalCostCents) / 100;
-                        if ($complementsReady) {
-                            $pdo->prepare("INSERT INTO vendas
-                                (user_id, produto_id, tamanho, vendedor_id, origem, quantidade, preco_unitario, custo_unitario, observacao, pedido_vitrine_id, personalizacao_json, custo_completo)
-                                VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)")
-                                ->execute([$uid, $produto_id, $tamanho, $origem_pedido, $quantidade, $preco, $unitCost, $obs_venda, $pid,
-                                    $customization ? json_encode($customization, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null, $costComplete ? 1 : 0]);
-                        } else {
-                            $pdo->prepare("INSERT INTO vendas
-                                (user_id, produto_id, tamanho, vendedor_id, origem, quantidade, preco_unitario, custo_unitario, observacao, pedido_vitrine_id)
-                                VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)")
-                                ->execute([$uid, $produto_id, $tamanho, $origem_pedido, $quantidade, $preco, $unitCost, $obs_venda, $pid]);
-                        }
-
-                        if ($tamanho === null) $pdo->prepare("
-                            UPDATE produtos
-                               SET quantidade = GREATEST(quantidade - ?, 0)
-                             WHERE id = ? AND user_id = ?
-                        ")->execute([$quantidade, $produto_id, $uid]);
-                    }
-
-                    $pdo->commit();
-
-                } catch (PDOException $e) {
-                    $pdo->rollBack();
-                    error_log("Erro ao declarar vendas do pedido vitrine #$pid (user $uid): " . $e->getMessage());
-                    $warning = 'Status atualizado, mas houve erro ao registrar vendas.';
-                }
-            }
+    $status_anterior = null;
+    try {
+        $pdo->beginTransaction();
+        // Serializa confirmações concorrentes antes de tocar em venda ou estoque.
+        $stmt_ped = $pdo->prepare('SELECT * FROM vitrine_pedidos WHERE id = ? AND user_id = ? LIMIT 1 FOR UPDATE');
+        $stmt_ped->execute([$pid, $uid]);
+        $pedido = $stmt_ped->fetch(PDO::FETCH_ASSOC);
+        if (!$pedido) {
+            $pdo->rollBack();
+            apierr('Pedido não encontrado', 404);
         }
 
-        syncConfirmedShippingExpense($pdo, $pedido, $uid);
+        $status_anterior = $pedido['status'];
+        $origem_pedido = commercial_origin_normalize($pedido['origem'] ?? null);
+        if ($status === 'confirmado' && $status_anterior !== 'confirmado') {
+            $saleCheck = $pdo->prepare('SELECT id FROM vendas WHERE pedido_vitrine_id = ? AND user_id = ? LIMIT 1 FOR UPDATE');
+            $saleCheck->execute([$pid, $uid]);
+            if ($saleCheck->fetchColumn() !== false) {
+                throw new RuntimeException('O pedido possui vendas parciais e exige revisão manual.');
+            }
+
+            $itens = json_decode((string)$pedido['itens_json'], true);
+            if (!is_array($itens) || !$itens) {
+                throw new RuntimeException('O pedido não possui itens válidos para confirmação.');
+            }
+
+            foreach ($itens as $item) {
+                $produto_id = (int)($item['produto_id'] ?? 0);
+                $quantidade = (int)($item['quantidade'] ?? 0);
+                $preco = (float)($item['preco'] ?? 0);
+                // Snapshots legados não tinham modo e representam estoque físico;
+                // o helper também aceita o alias gravado pelo Site PRO.
+                try { $snapshotMode = uplar_commercial_availability_snapshot_mode($item); }
+                catch (InvalidArgumentException $e) { throw new RuntimeException('O pedido contém um modo de disponibilidade inválido.', 0, $e); }
+                $tamanho = isset($item['tamanho']) && $item['tamanho'] !== null && $item['tamanho'] !== ''
+                    ? product_sizes_normalize($item['tamanho'])
+                    : null;
+                if ($produto_id < 1 || $quantidade < 1 || $preco <= 0) {
+                    throw new RuntimeException('O pedido contém um item inválido.');
+                }
+
+                $stmt_prod = $pdo->prepare('SELECT id, preco_custo, usa_tamanhos FROM produtos WHERE id = ? AND user_id = ? FOR UPDATE');
+                $stmt_prod->execute([$produto_id, $uid]);
+                $produto = $stmt_prod->fetch(PDO::FETCH_ASSOC);
+                if (!$produto) {
+                    throw new RuntimeException('Um produto do pedido não é mais válido.');
+                }
+
+                if ($snapshotMode === 'estoque') {
+                    if (((int)$produto['usa_tamanhos'] && $tamanho === null) || (!(int)$produto['usa_tamanhos'] && $tamanho !== null)) {
+                        throw new RuntimeException('Um tamanho do pedido não é mais válido.');
+                    }
+                    if ($tamanho !== null) {
+                        $deduct = $pdo->prepare('UPDATE produto_tamanhos SET quantidade = quantidade - ? WHERE produto_id = ? AND tamanho = ? AND ativo = 1 AND quantidade >= ?');
+                        $deduct->execute([$quantidade, $produto_id, $tamanho, $quantidade]);
+                        if ($deduct->rowCount() !== 1) {
+                            throw new RuntimeException('Estoque insuficiente para confirmar o pedido.');
+                        }
+                        product_sizes_sync_total($pdo, $produto_id, $uid);
+                    } else {
+                        $deduct = $pdo->prepare('UPDATE produtos SET quantidade = quantidade - ? WHERE id = ? AND user_id = ? AND quantidade >= ?');
+                        $deduct->execute([$quantidade, $produto_id, $uid, $quantidade]);
+                        if ($deduct->rowCount() !== 1) {
+                            throw new RuntimeException('Estoque insuficiente para confirmar o pedido.');
+                        }
+                    }
+                }
+
+                $obs_venda = "Pedido vitrine #$pid"
+                    . ($pedido['cliente_nome'] ? " — {$pedido['cliente_nome']}" : '')
+                    . ($pedido['tipo_entrega'] === 'entrega' ? ' (entrega)' : ' (retirada)');
+                $customization = is_array($item['personalizacao'] ?? null) ? $item['personalizacao'] : null;
+                $baseCostCents = is_numeric($customization['custo_base_centavos'] ?? null)
+                    ? (int)$customization['custo_base_centavos']
+                    : (int)round((float)$produto['preco_custo'] * 100);
+                $additionalCostCents = is_numeric($customization['custo_adicional_centavos'] ?? null)
+                    ? (int)$customization['custo_adicional_centavos']
+                    : 0;
+                $costComplete = $baseCostCents > 0 && (!$customization || !empty($customization['custos_completos']));
+                $unitCost = ($baseCostCents + $additionalCostCents) / 100;
+                if ($complementsReady) {
+                    $pdo->prepare('INSERT INTO vendas
+                        (user_id, produto_id, tamanho, vendedor_id, origem, quantidade, preco_unitario, custo_unitario, observacao, pedido_vitrine_id, personalizacao_json, custo_completo)
+                        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)')
+                        ->execute([$uid, $produto_id, $tamanho, $origem_pedido, $quantidade, $preco, $unitCost, $obs_venda, $pid,
+                            $customization ? json_encode($customization, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null, $costComplete ? 1 : 0]);
+                } else {
+                    $pdo->prepare('INSERT INTO vendas
+                        (user_id, produto_id, tamanho, vendedor_id, origem, quantidade, preco_unitario, custo_unitario, observacao, pedido_vitrine_id)
+                        VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)')
+                        ->execute([$uid, $produto_id, $tamanho, $origem_pedido, $quantidade, $preco, $unitCost, $obs_venda, $pid]);
+                }
+            }
+            syncConfirmedShippingExpense($pdo, $pedido, $uid);
+        }
+
+        $pdo->prepare('UPDATE vitrine_pedidos SET status = ? WHERE id = ? AND user_id = ?')
+            ->execute([$status, $pid, $uid]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        if ($status === 'confirmado') {
+            error_log("Erro ao confirmar pedido vitrine #$pid (user $uid): " . $e->getMessage());
+            apierr('O pedido permaneceu pendente porque não foi possível registrar integralmente as vendas e o estoque.', 409);
+        }
+        error_log("Erro ao atualizar status do pedido vitrine #$pid (user $uid): " . $e->getMessage());
+        apierr('Não foi possível atualizar o status do pedido.', 500);
     }
 
-    apiok(['pedido_confirmado_agora' => $status === 'confirmado' && $status_anterior !== 'confirmado'] + ($warning ? ['aviso' => $warning] : []));
+    apiok(['pedido_confirmado_agora' => $status === 'confirmado' && $status_anterior !== 'confirmado']);
     break;
 
 /* ── POST (autenticado): salvar frete de um pedido de entrega ── */

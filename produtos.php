@@ -4,6 +4,7 @@ require 'db.php';
 require 'helpers.php';
 require_once __DIR__ . '/includes/tracking_runtime.php';
 require_once __DIR__ . '/includes/business_profile_runtime.php';
+require_once __DIR__ . '/includes/commercial_availability.php';
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['username'])) {
     header("Location: login.php");
     exit;
@@ -12,6 +13,7 @@ get_csrf_token();
 $user_id  = $_SESSION['user_id'];
 $username = $_SESSION['username'];
 $pdo = get_pdo();
+$commercialAvailabilityReady = uplar_commercial_availability_schema_ready($pdo);
 $stmt = $pdo->prepare("SELECT role FROM users WHERE id = ?");
 $stmt->execute([$user_id]);
 $user     = $stmt->fetch();
@@ -628,6 +630,16 @@ button{font-family:inherit;cursor:pointer}
                         </div>
                     </div>
                     <div class="fl fw">
+                        <label>Disponibilidade para venda</label>
+                        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin:.4rem 0" role="group" aria-label="Modo de disponibilidade">
+                            <button type="button" class="pill pill-outline on" id="availabilityStock" <?= $commercialAvailabilityReady ? '' : 'disabled' ?>>Controlada por estoque</button>
+                            <button type="button" class="pill pill-outline" id="availabilityDemand" <?= $commercialAvailabilityReady ? '' : 'disabled' ?>>Sob demanda</button>
+                        </div>
+                        <span class="hint" id="availabilityModeHint">A venda depende do saldo físico informado.</span>
+                        <?php if (!$commercialAvailabilityReady): ?><span class="hint" style="color:#9a6700">Disponibilidade sob demanda será liberada após aplicar a migration M6.</span><?php endif; ?>
+                        <label class="xp-setting" style="margin-top:.65rem"><input type="checkbox" id="availabilityManual" <?= $commercialAvailabilityReady ? '' : 'disabled' ?> checked><span><strong>Produto disponível para venda</strong><small>Desative para pausar este produto temporariamente, sem alterar o estoque.</small></span></label>
+                    </div>
+                    <div class="fl fw" id="stockQuantityField">
                         <label id="stockQuantityLabel">Quantidade inicial em estoque</label>
                         <div class="qty-stepper">
                             <button type="button" class="qs-btn" id="qsMinus">−</button>
@@ -862,6 +874,7 @@ const BUSINESS_CONTEXT = <?= json_encode([
     'prioridades_cadastro' => $businessPreset['prioridades_cadastro'] ?? [],
     'perfil_concluido' => ($businessProfile['status_configuracao'] ?? '') === 'concluida',
 ], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_UNICODE) ?>;
+const COMMERCIAL_AVAILABILITY_SCHEMA_READY = <?= $commercialAvailabilityReady ? 'true' : 'false' ?>;
 const $ = id => document.getElementById(id);
 const esc = v => String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 const R = v => 'R$\u00a0'+Number(v||0).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2});
@@ -1064,6 +1077,7 @@ let curStep=1,activeStepId=1,editId=null;
 let sizeDraft=[],stockBeforeSizeChoice=0;
 let complementsEditor=null;
 let customizationEnabled=false,customizationChoiceExplicit=false,customizationDisableConfirmed=false;
+let availabilityMode='estoque',availabilityManual=true;
 let wizardBaseline='',skipWizardLeaveWarning=false,wizardFieldsDirty=false;
 
 function wizardSteps(){return STEPS.filter(step=>step.id!==5||customizationEnabled);}
@@ -1136,9 +1150,10 @@ function renderSizeEditor(){
     $('pQtd').setAttribute('aria-readonly',String(enabled));
     $('qsMinus').disabled=enabled;
     $('qsPlus').disabled=enabled;
+    $('stockQuantityField').hidden=availabilityMode==='sob_demanda'&&!enabled;
     $('stockQuantityLabel').textContent=enabled?'Estoque total dos tamanhos':(editId?'Quantidade em estoque':'Quantidade inicial em estoque');
     $('stockQuantityHint').textContent=enabled
-        ?'Total calculado pelas quantidades de cada tamanho. Edite os tamanhos abaixo para ajustar.'
+        ?(availabilityMode==='sob_demanda'?'Os saldos físicos por tamanho ficam preservados, mas não limitam as vendas sob demanda.':'Total calculado pelas quantidades de cada tamanho. Edite os tamanhos abaixo para ajustar.')
         :'Informe a quantidade disponível deste produto.';
 
     $('sizeEditor').hidden=!enabled;
@@ -1297,6 +1312,23 @@ function validateStep(stepId){
     return true;
 }
 
+function setAvailabilityMode(mode){
+    availabilityMode=mode==='sob_demanda'?'sob_demanda':'estoque';
+    $('availabilityStock').classList.toggle('on',availabilityMode==='estoque');
+    $('availabilityDemand').classList.toggle('on',availabilityMode==='sob_demanda');
+    const demand=availabilityMode==='sob_demanda';
+    $('stockQuantityField').hidden=demand&&!$('sizeYes').classList.contains('on');
+    $('availabilityModeHint').textContent=demand
+        ?'O produto é preparado ou disponibilizado após o pedido. Não reduz saldo físico; tamanhos continuam sendo escolhas válidas.'
+        :'A venda depende do saldo físico informado.';
+    renderSizeEditor();
+    wizardFieldsDirty=true;
+}
+
+$('availabilityStock').addEventListener('click',()=>setAvailabilityMode('estoque'));
+$('availabilityDemand').addEventListener('click',()=>setAvailabilityMode('sob_demanda'));
+$('availabilityManual').addEventListener('change',()=>{availabilityManual=$('availabilityManual').checked;wizardFieldsDirty=true;});
+
 function buildReview(){
     const img=$('prevI').src&&$('prevW').style.display!=='none';
     const val=$('pValidade').value;
@@ -1340,7 +1372,7 @@ function wizardDraftSnapshot(){
     return JSON.stringify({
         nome:$('pNome').value,codigo:$('pCod').value,descricao:$('pDesc').value,categoria:categoriaSelecionada,preco:$('pPreco').value,custo:$('pCusto').value,
         quantidade:$('pQtd').value,tamanhos:sizeDraft,validade:temValidade?$('pValidade').value:'',temValidade,
-        personalizacao:customizationEnabled,imagem:$('fImg').files.length?$('fImg').files[0].name:$('prevI').src
+        personalizacao:customizationEnabled,disponibilidade:availabilityMode,disponivel:availabilityManual,imagem:$('fImg').files.length?$('fImg').files[0].name:$('prevI').src
     });
 }
 function wizardHasUnsavedChanges(){
@@ -1364,6 +1396,14 @@ function openM(p=null){
     if($('btnNext').disabled){toast('Aguarde o produto terminar de salvar.','warn');return;}
     editId=p?.id??null;
     const hasStructuredSizes=productUsesSizes(p);
+    availabilityMode=(p?.disponibilidade_modo??p?.modo_disponibilidade)==='sob_demanda'?'sob_demanda':'estoque';
+    availabilityManual=Number(p?.disponibilidade_manual??1)!==0;
+    $('availabilityManual').checked=availabilityManual;
+    $('availabilityStock').classList.toggle('on',availabilityMode==='estoque');
+    $('availabilityDemand').classList.toggle('on',availabilityMode==='sob_demanda');
+    $('availabilityModeHint').textContent=availabilityMode==='sob_demanda'
+        ?'O produto é preparado ou disponibilizado após o pedido. Não reduz saldo físico; tamanhos continuam sendo escolhas válidas.'
+        :'A venda depende do saldo físico informado.';
     $('stockQuantityLabel').textContent=editId?'Quantidade em estoque':'Quantidade inicial em estoque';
     $('stockQuantityHint').textContent=hasStructuredSizes?'O total é calculado pelos tamanhos. Edite cada quantidade individualmente.':'Informe a quantidade disponível deste produto.';
     $('pNome').value=p?.nome??'';
@@ -1607,7 +1647,11 @@ async function saveProduct(){
     fd.append('codigo',$('pCod').value.trim());
     fd.append('preco',$('pPreco').value.trim());
     fd.append('preco_custo',$('pCusto').value.trim() || '0');
-    fd.append('quantidade',sizeDraft.length?String(sizeDraft.reduce((n,s)=>n+(Number(s.quantidade)||0),0)):$('pQtd').value.trim());
+    fd.append('quantidade',availabilityMode==='sob_demanda'&&!wasEditing&&!sizeDraft.length?'0':(sizeDraft.length?String(sizeDraft.reduce((n,s)=>n+(Number(s.quantidade)||0),0)):$('pQtd').value.trim()));
+    if(COMMERCIAL_AVAILABILITY_SCHEMA_READY){
+        fd.append('modo_disponibilidade',availabilityMode);
+        fd.append('disponibilidade_manual',availabilityManual?'1':'0');
+    }
     fd.append('descricao',$('pDesc').value.trim());
     if(categoriasProntas)fd.append('categoria_id',$('pCategoria').value);
     fd.append('validade', temValidade ? $('pValidade').value : '');

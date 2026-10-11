@@ -5,7 +5,7 @@
  * Does not execute the application or require a database.
  */
 declare(strict_types=1);
-$files = ['produtos.php', 'vitrine.php'];
+$files = ['produtos.php', 'vitrine.php', 'site.php'];
 foreach ($files as $file) {
     $input = file_get_contents(__DIR__ . '/../' . $file);
     if ($input === false) throw new RuntimeException('Cannot read ' . $file);
