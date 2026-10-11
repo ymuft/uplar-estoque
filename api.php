@@ -14,6 +14,7 @@ require_once __DIR__ . '/includes/product_sizes.php';
 require_once __DIR__ . '/includes/catalog_categories.php';
 require_once __DIR__ . '/includes/product_complements.php';
 require_once __DIR__ . '/includes/product_complements_admin.php';
+require_once __DIR__ . '/includes/commercial_availability.php';
 send_security_headers();
 
 if (!function_exists('uplar_api_json')) {
@@ -1043,6 +1044,14 @@ if ($acao === "adicionar") {
     $preco_custo = (float)$custoRaw;
     $qtd = (int)($_POST['quantidade'] ?? 0);
     $desc = trim($_POST['descricao'] ?? '');
+    $availabilityFieldsPosted = array_key_exists('modo_disponibilidade', $_POST) || array_key_exists('disponibilidade_manual', $_POST);
+    $availabilitySchemaReady = uplar_commercial_availability_schema_ready($pdo);
+    if ($availabilityFieldsPosted && !$availabilitySchemaReady) uplar_api_json(['ok'=>false,'error'=>'A disponibilidade comercial ainda não está habilitada nesta instalação.'],409);
+    $availabilityMode = $_POST['modo_disponibilidade'] ?? 'estoque';
+    if (!in_array($availabilityMode, ['estoque','sob_demanda'], true)) uplar_api_json(['ok'=>false,'error'=>'Modo de disponibilidade inválido.'],422);
+    $availabilityManualRaw = $_POST['disponibilidade_manual'] ?? '1';
+    if (!in_array((string)$availabilityManualRaw, ['0','1'], true)) uplar_api_json(['ok'=>false,'error'=>'Disponibilidade manual inválida.'],422);
+    $availabilityManual = (int)$availabilityManualRaw;
     $categoriaRecebida = array_key_exists('categoria_id', $_POST);
     try {
         $categoriaId = $categoriaRecebida ? uplar_catalogo_parse_input($_POST['categoria_id']) : null;
@@ -1061,11 +1070,13 @@ if ($acao === "adicionar") {
 
     try {
         $pdo->beginTransaction();
-        $stmt = $pdo->prepare(
-            "INSERT INTO produtos (user_id, nome, codigo, preco, preco_custo, quantidade, descricao, imagem)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-        );
-        $stmt->execute([$user_id, $nome, $codigo, $preco, $preco_custo, $qtd, $desc, $imagem]);
+        if ($availabilitySchemaReady && $availabilityFieldsPosted) {
+            $stmt = $pdo->prepare("INSERT INTO produtos (user_id, nome, codigo, preco, preco_custo, quantidade, descricao, imagem, modo_disponibilidade, disponibilidade_manual) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$user_id,$nome,$codigo,$preco,$preco_custo,$availabilityMode === 'sob_demanda' ? 0 : $qtd,$desc,$imagem,$availabilityMode,$availabilityManual]);
+        } else {
+            $stmt = $pdo->prepare("INSERT INTO produtos (user_id, nome, codigo, preco, preco_custo, quantidade, descricao, imagem) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([$user_id,$nome,$codigo,$preco,$preco_custo,$qtd,$desc,$imagem]);
+        }
         $newProductId = (int)$pdo->lastInsertId();
         if ($newProductId <= 0) {
             throw new PDOException('ID do produto não foi gerado.');
@@ -1117,6 +1128,13 @@ if ($acao === "editar") {
     $preco_custo = (float)$custoRaw;
     $qtd = (int)($_POST['quantidade'] ?? 0);
     $desc = trim($_POST['descricao'] ?? '');
+    $availabilityFieldsPosted = array_key_exists('modo_disponibilidade', $_POST) || array_key_exists('disponibilidade_manual', $_POST);
+    $availabilitySchemaReady = uplar_commercial_availability_schema_ready($pdo);
+    if ($availabilityFieldsPosted && !$availabilitySchemaReady) uplar_api_json(['ok'=>false,'error'=>'A disponibilidade comercial ainda não está habilitada nesta instalação.'],409);
+    $availabilityMode = $_POST['modo_disponibilidade'] ?? null;
+    if ($availabilityMode !== null && !in_array($availabilityMode, ['estoque','sob_demanda'], true)) uplar_api_json(['ok'=>false,'error'=>'Modo de disponibilidade inválido.'],422);
+    $availabilityManualRaw = $_POST['disponibilidade_manual'] ?? null;
+    if ($availabilityManualRaw !== null && !in_array((string)$availabilityManualRaw, ['0','1'], true)) uplar_api_json(['ok'=>false,'error'=>'Disponibilidade manual inválida.'],422);
     $categoriaRecebida = array_key_exists('categoria_id', $_POST);
     try {
         $categoriaId = $categoriaRecebida ? uplar_catalogo_parse_input($_POST['categoria_id']) : null;
@@ -1124,12 +1142,17 @@ if ($acao === "editar") {
         if ($categoriaId !== null && !uplar_catalogo_category($pdo,$user_id,$categoriaId)) throw new InvalidArgumentException('Categoria inválida ou de outra empresa.');
     } catch (InvalidArgumentException $e) { uplar_api_json(['ok'=>false,'error'=>$e->getMessage()],422); }
 
-    $stmt = $pdo->prepare("SELECT id, imagem FROM produtos WHERE id = ? AND user_id = ?");
+    $stmt = $pdo->prepare("SELECT id, imagem, quantidade FROM produtos WHERE id = ? AND user_id = ?");
     $stmt->execute([$id, $user_id]);
     $produto = $stmt->fetch();
 
     if (!$produto) {
         uplar_api_json(['ok' => false, 'error' => 'Produto não encontrado ou não pertence a você']);
+    }
+
+    // Sob demanda altera a disponibilidade comercial, sem apagar o saldo físico legado.
+    if ($availabilitySchemaReady && $availabilityMode === 'sob_demanda') {
+        $qtd = max(0, (int)($produto['quantidade'] ?? 0));
     }
 
     $imagem = $produto['imagem'];
@@ -1147,6 +1170,10 @@ if ($acao === "editar") {
         $pdo->beginTransaction();
         $sql = "UPDATE produtos SET nome = ?, codigo = ?, preco = ?, preco_custo = ?, quantidade = ?, descricao = ?";
         $params = [$nome, $codigo, $preco, $preco_custo, $qtd, $desc];
+        if ($availabilitySchemaReady && $availabilityFieldsPosted) {
+            if ($availabilityMode !== null) { $sql .= ", modo_disponibilidade = ?"; $params[] = $availabilityMode; }
+            if ($availabilityManualRaw !== null) { $sql .= ", disponibilidade_manual = ?"; $params[] = (int)$availabilityManualRaw; }
+        }
         if ($imagem !== $produto['imagem']) {
             $sql .= ", imagem = ?";
             $params[] = $imagem;

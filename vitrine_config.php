@@ -9,6 +9,7 @@ require_once __DIR__ . '/includes/catalog_categories.php';
 require_once __DIR__ . '/includes/business_profile_runtime.php';
 require_once __DIR__ . '/includes/tracking_runtime.php';
 require_once __DIR__ . '/includes/vitrine_featured.php';
+require_once __DIR__ . '/includes/commercial_availability.php';
 
 if (!isset($_SESSION['user_id'])) { header("Location: login.php"); exit; }
 
@@ -33,6 +34,11 @@ $businessProfileForVitrine = uplar_business_profile_read($pdo, $user_id);
 $businessPresetForVitrine = uplar_business_profile_get($businessProfileForVitrine['segmento']);
 $experienceMode = uplar_vitrine_experience_mode($cfg['experiencia_json'] ?? null);
 $experiencePrefs = uplar_vitrine_experience_preferences($cfg['experiencia_json'] ?? null);
+$commercialSchedule = uplar_storefront_schedule_preferences($cfg['experiencia_json'] ?? null);
+$commercialScheduleInvalid = !empty($commercialSchedule['configuracao_invalida']);
+$commercialScheduleSchemaReady = uplar_vitrine_experience_schema_disponivel($pdo);
+$commercialScheduleForEditor = $commercialSchedule;
+unset($commercialScheduleForEditor['configuracao_invalida']);
 $canonicalCategoriesReady = uplar_catalogo_schema_ready($pdo);
 // Somente para formulário administrativo ainda não salvo: o modo sugerido
 // não altera a vitrine pública nem publica uma configuração incompleta.
@@ -393,11 +399,12 @@ a{color:inherit;text-decoration:none} button{font-family:inherit;cursor:pointer}
 .phone-products-empty{grid-column:1/-1;padding:1rem .7rem;border:1px dashed rgba(255,255,255,.12);border-radius:8px;text-align:center;color:#8f9baa;font-size:.5rem;line-height:1.45}
 .phone-home{position:absolute;z-index:9;left:50%;bottom:5px;width:82px;height:3px;transform:translateX(-50%);border-radius:99px;background:rgba(255,255,255,.74);mix-blend-mode:difference;pointer-events:none}
 .phone-caption{display:flex;align-items:center;justify-content:center;gap:.32rem;margin-top:.7rem;color:var(--faint);font-size:.61rem;font-weight:650}.phone-caption .material-symbols-outlined{font-size:.76rem}
+.commercial-hours{margin-top:1rem;padding:1rem;border:1px solid var(--border);border-radius:12px;background:#fbfcfe}.commercial-hours-heading{display:grid;gap:.2rem;margin-bottom:.75rem}.commercial-hours-heading strong{font-size:.9rem}.commercial-hours-heading span,.commercial-hours-warning{font-size:.76rem;color:var(--muted);line-height:1.45}.commercial-hours-warning{padding:.65rem;border-radius:8px;background:#fff4d6;color:#875900}.schedule-global-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.6rem;margin:.65rem 0}.schedule-global-controls>.xp-setting{grid-column:1/-1}.schedule-service{border-top:1px solid var(--border);padding:.65rem 0}.schedule-service summary{font-weight:700;cursor:pointer}.schedule-days{display:grid;gap:.55rem;margin-top:.6rem}.schedule-day{display:grid;grid-template-columns:100px minmax(0,1fr);gap:.6rem;align-items:start;padding:.55rem;border:1px solid var(--border);border-radius:9px;background:#fff}.schedule-day-title{display:flex;align-items:center;gap:.4rem;font-size:.78rem;font-weight:650}.schedule-interval-list{display:grid;gap:.4rem}.schedule-interval{display:flex;align-items:center;gap:.35rem}.schedule-interval input{min-width:0;width:100%;padding:.42rem;border:1px solid var(--border);border-radius:7px;font:inherit}.schedule-add{margin-top:.35rem;border:0;background:transparent;color:var(--p);font:inherit;font-size:.75rem;font-weight:650}.schedule-remove{border:0;background:transparent;color:#b42318;font-size:1.1rem;line-height:1}
 .preview-actions{display:grid;grid-template-columns:1fr 1fr;gap:.5rem;padding:.75rem 1rem 1rem;border-top:1px solid var(--border);background:var(--card)}
 .preview-actions .vp-btn{margin:0;min-height:36px}.preview-actions .vp-copy{border:1px solid var(--border)}
 
 @media(max-width:1100px){.store-config-layout{grid-template-columns:1fr}.store-settings-card,.store-preview-card{grid-column:auto;grid-row:auto}.store-preview-card{position:static}.phone-device{width:min(100%,286px);height:570px}}
-@media(max-width:640px){.store-settings-head{padding:.9rem .9rem .75rem}.store-subnav{padding:0 .55rem .6rem}.store-section{padding:.9rem}.store-section .fg,.store-section .media-grid{grid-template-columns:1fr}.store-section .fw{grid-column:auto}.save-config-bar{align-items:stretch;flex-direction:column}.save-config-bar .btn-save{width:100%;justify-content:center}.preview-device-stage{padding:.8rem .5rem 1rem}.phone-device{height:548px}}
+@media(max-width:640px){.store-settings-head{padding:.9rem .9rem .75rem}.store-subnav{padding:0 .55rem .6rem}.store-section{padding:.9rem}.store-section .fg,.store-section .media-grid{grid-template-columns:1fr}.store-section .fw{grid-column:auto}.save-config-bar{align-items:stretch;flex-direction:column}.save-config-bar .btn-save{width:100%;justify-content:center}.preview-device-stage{padding:.8rem .5rem 1rem}.phone-device{height:548px}.schedule-global-controls{grid-template-columns:1fr}.schedule-day{grid-template-columns:1fr}.schedule-interval{gap:.25rem}}
 
 </style>
 <link rel="stylesheet" href="assets/vitrine-image-editor.css?v=20260714">
@@ -606,7 +613,23 @@ a{color:inherit;text-decoration:none} button{font-family:inherit;cursor:pointer}
                             <span class="hint">Use o mesmo número que seus clientes já utilizam para falar com a loja.</span>
                         </div>
                     </div>
-                    <label class="xp-setting"><input type="checkbox" id="xpOrders" <?= $experiencePrefs['pedidos_habilitados'] ? 'checked' : '' ?>><span><strong>Receber pedidos pela vitrine</strong><small>Desmarque para pausar pedidos. Os horários abaixo são informativos, sem cálculo automático de abertura.</small></span></label>
+                    <label class="xp-setting"><input type="checkbox" id="xpOrders" <?= $experiencePrefs['pedidos_habilitados'] ? 'checked' : '' ?>><span><strong>Receber pedidos pela vitrine</strong><small>Desmarque para pausar pedidos. Os horários estruturados controlam a disponibilidade de entrega e retirada.</small></span></label>
+                    <div class="commercial-hours" aria-labelledby="commercialHoursTitle">
+                        <div class="commercial-hours-heading"><strong id="commercialHoursTitle">Horários para receber pedidos</strong><span>O cliente só verá disponibilidade calculada quando você ativar este controle.</span></div>
+                        <?php if ($commercialScheduleInvalid): ?><p class="commercial-hours-warning" role="alert">Os horários salvos não puderam ser lidos. Revise-os antes de ativar o controle; a configuração atual bloqueia pedidos fora de horário.</p><?php endif; ?>
+                        <?php if (!$commercialScheduleSchemaReady): ?><p class="commercial-hours-warning" role="status">Este controle ficará disponível depois que a configuração de experiência da vitrine estiver habilitada.</p><?php endif; ?>
+                        <label class="xp-setting"><input type="checkbox" id="scheduleEnabled" <?= !empty($commercialSchedule['controle_horarios']) ? 'checked' : '' ?> <?= $commercialScheduleSchemaReady ? '' : 'disabled' ?>><span><strong>Controlar disponibilidade pelos horários</strong><small>Sem horários configurados, o sistema mantém o comportamento anterior da vitrine.</small></span></label>
+                        <label class="xp-setting"><input type="checkbox" id="schedulePaused" <?= !empty($commercialSchedule['pausado']) ? 'checked' : '' ?> <?= $commercialScheduleSchemaReady ? '' : 'disabled' ?>><span><strong>Pausar pedidos temporariamente</strong><small>Não altera produtos, pedidos ou estoque.</small></span></label>
+                        <div id="scheduleEditor" <?= !empty($commercialSchedule['controle_horarios']) || !empty($commercialSchedule['pausado']) ? '' : 'hidden' ?>>
+                            <div class="schedule-global-controls">
+                                <div class="fl"><label for="schedulePauseMessage">Mensagem de pausa (opcional)</label><input id="schedulePauseMessage" maxlength="160" value="<?= htmlspecialchars($commercialSchedule['mensagem_pausa'] ?? '', ENT_QUOTES, 'UTF-8') ?>" placeholder="Ex.: Voltamos a receber pedidos às 18h" <?= $commercialScheduleSchemaReady ? '' : 'disabled' ?>></div>
+                                <div class="fl"><label for="scheduleTimezone">Fuso horário</label><select id="scheduleTimezone" <?= $commercialScheduleSchemaReady ? '' : 'disabled' ?>><?php foreach (['America/Manaus'=>'Manaus','America/Sao_Paulo'=>'Brasília / São Paulo','America/Belem'=>'Belém','America/Recife'=>'Recife','America/Rio_Branco'=>'Rio Branco'] as $timezoneValue=>$timezoneLabel): ?><option value="<?= htmlspecialchars($timezoneValue) ?>" <?= ($commercialSchedule['timezone'] ?? 'America/Sao_Paulo') === $timezoneValue ? 'selected' : '' ?>><?= htmlspecialchars($timezoneLabel) ?></option><?php endforeach; ?></select></div>
+                            </div>
+                            <details class="schedule-service"><summary>Entrega</summary><div class="schedule-days" id="scheduleDays-entrega"></div></details>
+                            <details class="schedule-service"><summary>Retirada</summary><div class="schedule-days" id="scheduleDays-retirada"></div></details>
+                            <div style="display:grid;gap:.4rem;border-top:1px solid var(--border);padding-top:.8rem"><strong>Exceções futuras</strong><span class="hint">Marque datas em que a loja ficará fechada. A regra vale para entrega e retirada.</span><div style="display:flex;align-items:end;gap:.5rem;flex-wrap:wrap"><label for="scheduleExceptionDate">Data</label><input id="scheduleExceptionDate" type="date"><button type="button" class="pill pill-outline" id="scheduleExceptionAdd">Adicionar fechamento</button></div><div id="scheduleExceptionList"></div></div>
+                        </div>
+                    </div>
                 </section>
 
                 <section class="store-section" id="storeSectionRetirada" role="tabpanel" aria-labelledby="storeTabRetirada" data-store-panel="retirada" hidden>
@@ -1065,8 +1088,8 @@ function previewExperience(mode){
 async function salvar() {
     const btn = $('btnSalvar');
     if(btn.disabled)return;
-    let experienceOptions;
-    try{experienceOptions=experienceAdmin.getPreferences();if(experienceOptions.pedidos_habilitados&&!experienceOptions.entrega_habilitada&&!experienceOptions.retirada_habilitada)throw Error('Habilite entrega ou retirada para receber pedidos.');if(!$('xpFreight').checkValidity())throw Error('Informe uma taxa de entrega válida.');}
+    let experienceOptions,commercialScheduleToSave=null;
+    try{experienceOptions=experienceAdmin.getPreferences();if(experienceOptions.pedidos_habilitados&&!experienceOptions.entrega_habilitada&&!experienceOptions.retirada_habilitada)throw Error('Habilite entrega ou retirada para receber pedidos.');if(!$('xpFreight').checkValidity())throw Error('Informe uma taxa de entrega válida.');if(scheduleDirty)commercialScheduleToSave=collectCommercialSchedule();}
     catch(error){activateStoreSection(experienceAdmin.edit?'experiencia':'retirada');toast(error.message,'err');return;}
     const slug = $('slugInp').value.trim().toLowerCase()
         .replace(/[^a-z0-9-]/g,'-').replace(/-+/g,'-').replace(/^-|-$/g,'');
@@ -1079,6 +1102,7 @@ async function salvar() {
     const fd = new FormData();
     fd.append('acao','salvar_config');
     fd.append('experiencia_opcoes',JSON.stringify(experienceOptions));
+    if(commercialScheduleToSave)fd.append('atendimento_operacao',JSON.stringify(commercialScheduleToSave));
     fd.append('valor_frete',$('xpFreight').value);
     fd.append('modo_experiencia', document.querySelector('[name="modo_experiencia"]:checked')?.value || 'padrao');
     fd.append('csrf_token', CSRF);
@@ -1101,6 +1125,7 @@ async function salvar() {
         if (j.ok) {
             toast('Vitrine salva com sucesso! ');
             experienceSettingsDirty=false;experienceAdmin.dirty=false;
+            if(commercialScheduleToSave){scheduleDraft=JSON.parse(JSON.stringify(commercialScheduleToSave));scheduleDirty=false;}
             atualizarSlugPreview(j.slug || slug);
             $('slugInp').value = j.slug || slug;
             $('btnVerVitrine').href = j.url || buildUrl(j.slug || slug);
@@ -1363,6 +1388,82 @@ syncPhoneLogoFallback();
 // ── Utilitários ────────────────────────────────────────────
 function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtBrl(v) { return Number(v).toFixed(2).replace('.',','); }
+
+const COMMERCIAL_SCHEDULE_INITIAL = <?= json_encode($commercialScheduleForEditor,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT|JSON_UNESCAPED_UNICODE) ?>;
+const scheduleDays = [['seg','Segunda'],['ter','Terça'],['qua','Quarta'],['qui','Quinta'],['sex','Sexta'],['sab','Sábado'],['dom','Domingo']];
+let scheduleDraft = JSON.parse(JSON.stringify(COMMERCIAL_SCHEDULE_INITIAL));
+let scheduleDirty = false;
+function renderScheduleService(service){
+    const host=$(`scheduleDays-${service}`);if(!host)return;
+    host.innerHTML=scheduleDays.map(([day,label])=>{
+        const intervals=scheduleDraft.horarios?.[service]?.[day]||[];
+        return `<div class="schedule-day" data-schedule-service="${service}" data-schedule-day="${day}">
+            <label class="schedule-day-title"><input type="checkbox" data-day-enabled ${intervals.length?'checked':''}>${label}</label>
+            <div><div class="schedule-interval-list" ${intervals.length?'':'hidden'}>${intervals.map((interval,index)=>`<div class="schedule-interval"><input type="time" aria-label="Início ${label}" value="${esc(interval.inicio)}" data-interval-start="${index}"><span>às</span><input type="time" aria-label="Fim ${label}" value="${esc(interval.fim)}" data-interval-end="${index}"><button type="button" class="schedule-remove" data-remove-interval="${index}" aria-label="Remover horário">×</button></div>`).join('')}</div>
+            <button type="button" class="schedule-add" data-add-interval>+ Adicionar intervalo</button></div>
+        </div>`;
+    }).join('');
+}
+function markScheduleChanged(){scheduleDirty=true;}
+function addScheduleInterval(service,day){
+    scheduleDraft.horarios[service][day]??=[];
+    if(scheduleDraft.horarios[service][day].length>=12){toast('Cada dia aceita até 12 intervalos.','err');return;}
+    scheduleDraft.horarios[service][day].push({inicio:'09:00',fim:'18:00'});markScheduleChanged();renderScheduleService(service);
+}
+document.querySelectorAll('[id^="scheduleDays-"]').forEach(host=>{
+    host.addEventListener('change',event=>{
+        const dayEl=event.target.closest('.schedule-day');if(!dayEl)return;
+        const {scheduleService:service,scheduleDay:day}=dayEl.dataset;
+        if(event.target.matches('[data-day-enabled]')){
+            scheduleDraft.horarios[service][day]=event.target.checked?[{inicio:'09:00',fim:'18:00'}]:[];
+            markScheduleChanged();renderScheduleService(service);return;
+        }
+        const start=event.target.dataset.intervalStart,end=event.target.dataset.intervalEnd;
+        if(start!==undefined)scheduleDraft.horarios[service][day][Number(start)].inicio=event.target.value;
+        if(end!==undefined)scheduleDraft.horarios[service][day][Number(end)].fim=event.target.value;
+        markScheduleChanged();
+    });
+    host.addEventListener('click',event=>{
+        const addButton=event.target.closest('[data-add-interval]');
+        if(addButton){const dayEl=addButton.closest('.schedule-day');addScheduleInterval(dayEl.dataset.scheduleService,dayEl.dataset.scheduleDay);return;}
+        const removeButton=event.target.closest('[data-remove-interval]');
+        if(removeButton){const dayEl=removeButton.closest('.schedule-day');const {scheduleService:service,scheduleDay:day}=dayEl.dataset;scheduleDraft.horarios[service][day].splice(Number(removeButton.dataset.removeInterval),1);markScheduleChanged();renderScheduleService(service);}
+    });
+});
+renderScheduleService('entrega');renderScheduleService('retirada');
+function renderScheduleExceptions(){
+    const list=$('scheduleExceptionList');if(!list)return;
+    list.innerHTML=(scheduleDraft.excecoes||[]).map(exception=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:.45rem 0;border-top:1px solid var(--border);font-size:.78rem"><span>${esc(exception.data)} · ${exception.fechado?'Fechado':'Horário especial'}</span><button type="button" class="schedule-remove" data-remove-exception="${esc(exception.data)}" aria-label="Remover exceção de ${esc(exception.data)}">×</button></div>`).join('')||'<span class="hint">Nenhuma data especial cadastrada.</span>';
+}
+renderScheduleExceptions();
+$('scheduleExceptionDate').min=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);
+$('scheduleExceptionAdd').addEventListener('click',()=>{
+    const date=$('scheduleExceptionDate').value,today=$('scheduleExceptionDate').min;
+    if(!date||date<today){toast('Escolha uma data futura.','err');return;}
+    scheduleDraft.excecoes??=[];
+    if(scheduleDraft.excecoes.some(exception=>exception.data===date)){toast('Essa data já está configurada.','err');return;}
+    scheduleDraft.excecoes.push({data:date,fechado:true});scheduleDraft.excecoes.sort((a,b)=>a.data.localeCompare(b.data));
+    $('scheduleExceptionDate').value='';markScheduleChanged();renderScheduleExceptions();
+});
+$('scheduleExceptionList').addEventListener('click',event=>{
+    const button=event.target.closest('[data-remove-exception]');if(!button)return;
+    scheduleDraft.excecoes=scheduleDraft.excecoes.filter(exception=>exception.data!==button.dataset.removeException);markScheduleChanged();renderScheduleExceptions();
+});
+$('scheduleEnabled').addEventListener('change',()=>{$('scheduleEditor').hidden=!$('scheduleEnabled').checked&&!$('schedulePaused').checked;markScheduleChanged();});
+$('schedulePaused').addEventListener('change',()=>{$('scheduleEditor').hidden=!$('scheduleEnabled').checked&&!$('schedulePaused').checked;markScheduleChanged();});
+['schedulePauseMessage','scheduleTimezone'].forEach(id=>$(id).addEventListener('change',markScheduleChanged));
+function collectCommercialSchedule(){
+    const value={version:1,controle_horarios:$('scheduleEnabled').checked,timezone:$('scheduleTimezone').value,pausado:$('schedulePaused').checked,mensagem_pausa:$('schedulePauseMessage').value.trim(),horarios:scheduleDraft.horarios,excecoes:scheduleDraft.excecoes||[]};
+    if(value.controle_horarios){
+        const prefs=experienceAdmin.getPreferences();
+        for(const service of [['entrega','entrega_habilitada'],['retirada','retirada_habilitada']]){
+            if(!prefs[service[1]])continue;
+            const hasHours=Object.values(value.horarios[service[0]]||{}).some(intervals=>Array.isArray(intervals)&&intervals.length);
+            if(!hasHours)throw Error(`Informe pelo menos um horário de ${service[0]}.`);
+        }
+    }
+    return value;
+}
 
 const experienceAdmin=new VitrineExperienceAdmin($('experienceCategories'),<?= json_encode($experiencePrefs,JSON_HEX_TAG|JSON_HEX_AMP|JSON_HEX_APOS|JSON_HEX_QUOT) ?>,async()=>{
     if(!produtosCarregados)await carregarProdutos();

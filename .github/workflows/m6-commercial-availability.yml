@@ -1,0 +1,44 @@
+name: M6 commercial availability
+
+on:
+  pull_request:
+    branches:
+      - feature/m4-m5-adaptativa
+  push:
+    branches:
+      - feature/m6-commercial-availability
+
+jobs:
+  php-and-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          tools: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: PHP syntax
+        run: |
+          php -l api.php
+          php -l produtos.php
+          php -l site.php
+          php -l site_pro_api.php
+          php -l site_pro_commerce_helpers.php
+          php -l vitrine.php
+          php -l vitrine_api.php
+          php -l vitrine_config.php
+          php -l includes/commercial_availability.php
+          php -l tests/commercial_availability_test.php
+      - name: Business rule tests
+        run: php tests/commercial_availability_test.php
+      - name: Inline JavaScript syntax
+        run: |
+          php tests/check-inline-php-js.php
+          node --check /tmp/uplar-produtos-inline.js
+          node --check /tmp/uplar-vitrine-inline.js
+          node --check /tmp/uplar-site-inline.js
+      - name: Existing storefront regressions
+        run: node --test tests/storefront-menu.test.js tests/product-wizard-regression.test.js

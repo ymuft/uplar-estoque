@@ -4,6 +4,7 @@ require_once __DIR__ . '/subscription.php';
 require_once __DIR__ . '/site_pro_helpers.php';
 require_once __DIR__ . '/includes/product_sizes.php';
 require_once __DIR__ . '/includes/product_complements.php';
+require_once __DIR__ . '/includes/commercial_availability.php';
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
@@ -26,6 +27,7 @@ if (preg_match('#^/site(?:\.php)?/?$#', $requestPath)) {
 $pdo = get_pdo();
 site_pro_ensure_schema($pdo);
 product_sizes_ensure_schema($pdo);
+$availabilitySchemaReady = uplar_commercial_availability_schema_ready($pdo);
 $complementsReady = uplar_complementos_schema_disponivel($pdo);
 $ownerStmt = $pdo->prepare('SELECT id, username, whatsapp_number FROM users WHERE vitrine_slug = ? LIMIT 1');
 $ownerStmt->execute([$slug]);
@@ -41,15 +43,29 @@ if (!$config['ativo'] || $config['canal_publico'] !== 'site_pro') {
     exit('Site não disponível.');
 }
 
+$availabilitySelect = $availabilitySchemaReady ? uplar_commercial_availability_product_select($pdo, 'p') : '';
 $productsStmt = $pdo->prepare('
-    SELECT id, nome, descricao, preco, quantidade, imagem, usa_tamanhos
-    FROM produtos
-    WHERE user_id = ? AND quantidade > 0 AND site_pro_exposto = 1
-    ORDER BY nome ASC
+    SELECT p.id, p.nome, p.descricao, p.preco, p.quantidade, p.imagem, p.usa_tamanhos' . $availabilitySelect . '
+    FROM produtos p
+    WHERE p.user_id = ? AND p.site_pro_exposto = 1
+    ORDER BY p.nome ASC
     LIMIT 100
 ');
 $productsStmt->execute([(int)$owner['id']]);
-$produtos = $productsStmt->fetchAll(PDO::FETCH_ASSOC);
+$produtos = [];
+$activeSizeStmt = $pdo->prepare('SELECT 1 FROM produto_tamanhos WHERE produto_id = ? AND ativo = 1 LIMIT 1');
+foreach ($productsStmt->fetchAll(PDO::FETCH_ASSOC) as $product) {
+    $product = uplar_commercial_availability_normalize_product($product);
+    if ($product['usa_tamanhos']) {
+        $activeSizeStmt->execute([(int)$product['id']]);
+        if (!$activeSizeStmt->fetchColumn()) continue;
+    }
+    $availability = uplar_commercial_availability_evaluate_product($product, $product['usa_tamanhos'] ? '__catalogo__' : null, (int)$product['quantidade'], (int)$product['quantidade']);
+    if (!$availability['available']) continue;
+    $product['modo_disponibilidade'] = $availability['mode'];
+    $product['limita_estoque'] = $availability['stock_limited'];
+    $produtos[] = $product;
+}
 $customProductIds = [];
 if ($complementsReady && $produtos) {
     $ids = array_map('intval', array_column($produtos, 'id'));
@@ -420,7 +436,7 @@ $location = trim($config['endereco'] . ($config['cidade_uf'] !== '' ? ' — ' . 
                         <div class="product-body">
                             <div class="product-name"><?= htmlspecialchars($produto['nome']) ?></div>
                             <div class="product-desc"><?= htmlspecialchars((string)$produto['descricao']) ?></div>
-                            <?php if ($config['mostrar_estoque']): ?><div class="stock"><?= (int)$produto['quantidade'] ?> unidade<?= (int)$produto['quantidade'] === 1 ? ' disponível' : 's disponíveis' ?></div><?php endif; ?>
+                            <?php if ($config['mostrar_estoque']): ?><div class="stock"><?php if ($produto['limita_estoque']): ?><?= (int)$produto['quantidade'] ?> unidade<?= (int)$produto['quantidade'] === 1 ? ' disponível' : 's disponíveis' ?><?php else: ?>Sob demanda<?php endif; ?></div><?php endif; ?>
                             <div class="product-foot">
                                 <span class="price">R$ <?= number_format((float)$produto['preco'], 2, ',', '.') ?></span>
                                 <button class="add-button" type="button" data-product="<?= (int)$produto['id'] ?>" data-configurable="<?= $produto['tem_complementos'] || $produto['usa_tamanhos'] ? '1' : '0' ?>" aria-label="Adicionar <?= htmlspecialchars($produto['nome']) ?> ao carrinho">
@@ -705,7 +721,7 @@ function renderCustomProduct() {
         <section class="custom-product-group">
             <div class="custom-product-group-title">Escolha o tamanho *</div>
             <div class="custom-product-group-help">Selecione uma variação disponível</div>
-            ${(customProductConfig.tamanhos || []).map(size => `<label class="custom-product-option"><input type="radio" name="site-product-size" value="${escapeHtml(size.tamanho)}" ${customProductSize === size.tamanho ? 'checked' : ''} ${Number(size.quantidade) < 1 ? 'disabled' : ''} onchange="customProductSize=this.value;customProductQuantity=1;renderCustomProduct()"><span class="custom-product-option-name">${escapeHtml(size.tamanho)}</span><span class="custom-product-option-price">${Number(size.quantidade) > 0 ? `${Number(size.quantidade)} disponível(is)` : 'Indisponível'}</span></label>`).join('')}
+            ${(customProductConfig.tamanhos || []).map(size => `<label class="custom-product-option"><input type="radio" name="site-product-size" value="${escapeHtml(size.tamanho)}" ${customProductSize === size.tamanho ? 'checked' : ''} ${size.disponivel === false ? 'disabled' : ''} onchange="customProductSize=this.value;customProductQuantity=1;renderCustomProduct()"><span class="custom-product-option-name">${escapeHtml(size.tamanho)}</span><span class="custom-product-option-price">${size.disponivel === false ? 'Indisponível' : (customProductConfig.limita_estoque ? `${Number(size.quantidade)} disponível(is)` : 'Sob demanda')}</span></label>`).join('')}
         </section>` : '';
     const groups = (customProductConfig.grupos || []).map(group => {
         const single = Number(group.maximo) === 1;
@@ -724,9 +740,9 @@ function renderCustomProduct() {
         }).join('');
         return `<section class="custom-product-group"><div class="custom-product-group-title">${escapeHtml(group.nome)}${required ? ' *' : ''}</div><div class="custom-product-group-help">${help}</div>${none}${options}</section>`;
     }).join('');
-    const max = customProductConfig.usa_tamanhos
-        ? Number((customProductConfig.tamanhos || []).find(size => size.tamanho === customProductSize)?.quantidade || 0)
-        : Number(customProduct.quantidade || 999);
+    const max = customProductConfig.limita_estoque
+        ? (customProductConfig.usa_tamanhos ? Number((customProductConfig.tamanhos || []).find(size => size.tamanho === customProductSize)?.quantidade || 0) : Number(customProduct.quantidade || 0))
+        : 99;
     customProductQuantity = Math.min(Math.max(1, customProductQuantity), Math.max(1, max || 1));
     const body = document.getElementById('customProductBody');
     const previousNote = customProductNote;
@@ -736,9 +752,9 @@ function renderCustomProduct() {
 }
 
 function changeCustomProductQuantity(delta) {
-    const max = customProductConfig?.usa_tamanhos
-        ? Number((customProductConfig.tamanhos || []).find(size => size.tamanho === customProductSize)?.quantidade || 0)
-        : Number(customProduct?.quantidade || 999);
+    const max = customProductConfig?.limita_estoque
+        ? (customProductConfig?.usa_tamanhos ? Number((customProductConfig.tamanhos || []).find(size => size.tamanho === customProductSize)?.quantidade || 0) : Number(customProduct?.quantidade || 0))
+        : 99;
     customProductQuantity = Math.min(max, Math.max(1, customProductQuantity + delta));
     renderCustomProduct();
 }

@@ -4,6 +4,7 @@ require_once __DIR__ . '/payment_verification.php';
 require_once __DIR__ . '/includes/commercial_origin.php';
 require_once __DIR__ . '/includes/product_sizes.php';
 require_once __DIR__ . '/includes/product_complements.php';
+require_once __DIR__ . '/includes/commercial_availability.php';
 
 function site_pro_commerce_ensure_schema(PDO $pdo): void
 {
@@ -243,6 +244,7 @@ function site_pro_confirm_paid_order(
 ): void {
     commercial_origin_ensure_schema($pdo);
     product_sizes_ensure_schema($pdo);
+    $availabilitySchemaReady = uplar_commercial_availability_schema_ready($pdo);
     $complementsReady = uplar_complementos_schema_disponivel($pdo);
     $paymentId = (int)$payment['id'];
     $orderId = (int)$payment['pedido_id'];
@@ -262,22 +264,6 @@ function site_pro_confirm_paid_order(
         $lockPayment->execute([$paymentId]);
         $currentStatus = (string)$lockPayment->fetchColumn();
 
-        $pdo->prepare("UPDATE site_pro_pagamentos
-            SET status = 'pago', pago_em = COALESCE(pago_em, NOW()), transaction_nsu = ?, invoice_slug = ?,
-                gateway_amount_centavos = ?, paid_amount_centavos = ?, installments = ?, capture_method = ?,
-                receipt_url = COALESCE(NULLIF(?, ''), receipt_url)
-            WHERE id = ?")
-            ->execute([
-                $transactionNsu,
-                $invoiceSlug,
-                (int)$checkResult['amount'],
-                (int)$checkResult['paid_amount'],
-                $installments,
-                $captureMethod ?: null,
-                site_pro_valid_receipt_url($receiptUrl),
-                $paymentId,
-            ]);
-
         $orderStmt = $pdo->prepare('SELECT * FROM vitrine_pedidos WHERE id = ? AND user_id = ? FOR UPDATE');
         $orderStmt->execute([$orderId, $userId]);
         $order = $orderStmt->fetch(PDO::FETCH_ASSOC);
@@ -285,40 +271,59 @@ function site_pro_confirm_paid_order(
             throw new RuntimeException('Pedido do pagamento não encontrado.');
         }
 
-        $pdo->prepare("UPDATE vitrine_pedidos
-            SET status = 'confirmado', pagamento_status = 'pago', pagamento_metodo = ?
-            WHERE id = ? AND user_id = ?")
-            ->execute([$captureMethod ?: null, $orderId, $userId]);
-
         $saleCheck = $pdo->prepare('SELECT COUNT(*) FROM vendas WHERE pedido_vitrine_id = ? AND user_id = ?');
         $saleCheck->execute([$orderId, $userId]);
         if ((int)$saleCheck->fetchColumn() === 0) {
             $items = json_decode((string)$order['itens_json'], true);
-            foreach (is_array($items) ? $items : [] as $item) {
+            if (!is_array($items) || !$items) throw new RuntimeException('Itens do pedido inválidos.');
+            $validatedItems = [];
+            $reservedStock = [];
+            $availabilitySelect = $availabilitySchemaReady ? uplar_commercial_availability_product_select($pdo, 'p') : '';
+            foreach ($items as $item) {
                 $productId = (int)($item['produto_id'] ?? 0);
                 $quantity = (int)($item['quantidade'] ?? 0);
                 $unitPrice = (float)($item['preco'] ?? 0);
-                $size = isset($item['tamanho']) && $item['tamanho'] !== null && $item['tamanho'] !== '' ? product_sizes_normalize($item['tamanho']) : null;
-                if ($productId < 1 || $quantity < 1 || $unitPrice < 0) {
-                    continue;
+                if ($productId < 1 || $quantity < 1 || $unitPrice < 0) throw new RuntimeException('Item do pedido inválido.');
+                try {
+                    $size = isset($item['tamanho']) && $item['tamanho'] !== null && $item['tamanho'] !== '' ? product_sizes_normalize($item['tamanho']) : null;
+                } catch (Throwable $e) {
+                    throw new RuntimeException('Tamanho do pedido inválido.', 0, $e);
                 }
-                $productStmt = $pdo->prepare('SELECT quantidade, preco_custo, usa_tamanhos FROM produtos WHERE id = ? AND user_id = ? FOR UPDATE');
+                try { $snapshotMode = uplar_commercial_availability_snapshot_mode($item); }
+                catch (InvalidArgumentException $e) { throw new RuntimeException('Modo de disponibilidade do pedido inválido.', 0, $e); }
+                $productStmt = $pdo->prepare('SELECT p.quantidade, p.preco_custo, p.usa_tamanhos' . $availabilitySelect . ' FROM produtos p WHERE p.id = ? AND p.user_id = ? FOR UPDATE');
                 $productStmt->execute([$productId, $userId]);
                 $product = $productStmt->fetch(PDO::FETCH_ASSOC);
-                if (!$product) {
-                    continue;
-                }
-                if ((int)$product['usa_tamanhos'] && $size === null) continue;
-                if (!(int)$product['usa_tamanhos'] && $size !== null) continue;
+                if (!$product) throw new RuntimeException('Produto do pedido não encontrado.');
+                $product = uplar_commercial_availability_normalize_product($product);
+                if ((int)$product['usa_tamanhos'] && $size === null) throw new RuntimeException('O produto exige tamanho.');
+                if (!(int)$product['usa_tamanhos'] && $size !== null) throw new RuntimeException('O produto não aceita tamanho.');
+                $variantStock = null;
                 if ($size !== null) {
-                    $deduct = $pdo->prepare('UPDATE produto_tamanhos SET quantidade = quantidade - ? WHERE produto_id = ? AND tamanho = ? AND ativo = 1 AND quantidade >= ?');
-                    $deduct->execute([$quantity, $productId, $size, $quantity]);
-                    if ($deduct->rowCount() !== 1) continue;
-                    product_sizes_sync_total($pdo, $productId, $userId);
-                } elseif ((int)$product['quantidade'] < $quantity) {
-                    continue;
+                    $sizeStmt = $pdo->prepare('SELECT quantidade FROM produto_tamanhos WHERE produto_id = ? AND tamanho = ? AND ativo = 1 FOR UPDATE');
+                    $sizeStmt->execute([$productId, $size]);
+                    $sizeRow = $sizeStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$sizeRow) throw new RuntimeException('Tamanho do pedido indisponível.');
+                    $variantStock = (int)$sizeRow['quantidade'];
                 }
+                $product['disponibilidade_modo'] = $snapshotMode;
+                // A pausa manual impede novos pedidos, mas não pode invalidar
+                // um pedido já criado e pago. Mantemos abaixo a validação e a
+                // baixa do estoque físico de acordo com o snapshot do pedido.
+                $product['disponibilidade_manual'] = true;
+                $availability = uplar_commercial_availability_evaluate_product($product, $size, $variantStock, (int)$product['quantidade']);
+                if (!$availability['available'] || !uplar_commercial_availability_reserve_quantity($reservedStock, $productId, $size, $quantity, $availability)) throw new RuntimeException('Estoque do pedido indisponível.');
+                $validatedItems[] = compact('item', 'productId', 'quantity', 'unitPrice', 'size', 'snapshotMode', 'product');
+            }
 
+            foreach ($validatedItems as $validatedItem) {
+                $item = $validatedItem['item'];
+                $productId = $validatedItem['productId'];
+                $quantity = $validatedItem['quantity'];
+                $unitPrice = $validatedItem['unitPrice'];
+                $size = $validatedItem['size'];
+                $snapshotMode = $validatedItem['snapshotMode'];
+                $product = $validatedItem['product'];
                 $personalization = is_array($item['personalizacao'] ?? null) ? $item['personalizacao'] : null;
                 $baseCostCents = is_numeric($personalization['custo_base_centavos'] ?? null)
                     ? (int)$personalization['custo_base_centavos']
@@ -349,12 +354,29 @@ function site_pro_confirm_paid_order(
                         (user_id, produto_id, tamanho, vendedor_id, origem, quantidade, preco_unitario, custo_unitario, observacao, pedido_vitrine_id)
                         VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)')->execute($saleValues);
                 }
-                if ($size === null) {
-                    $pdo->prepare('UPDATE produtos SET quantidade = GREATEST(0, quantidade - ?) WHERE id = ? AND user_id = ?')
-                        ->execute([$quantity, $productId, $userId]);
+                if ($snapshotMode === 'estoque') {
+                    if ($size !== null) {
+                        $deduct = $pdo->prepare('UPDATE produto_tamanhos SET quantidade = quantidade - ? WHERE produto_id = ? AND tamanho = ? AND ativo = 1 AND quantidade >= ?');
+                        $deduct->execute([$quantity, $productId, $size, $quantity]);
+                        if ($deduct->rowCount() !== 1) throw new RuntimeException('Estoque do tamanho mudou durante a confirmação.');
+                        product_sizes_sync_total($pdo, $productId, $userId);
+                    } else {
+                        $deduct = $pdo->prepare('UPDATE produtos SET quantidade = quantidade - ? WHERE id = ? AND user_id = ? AND quantidade >= ?');
+                        $deduct->execute([$quantity, $productId, $userId, $quantity]);
+                        if ($deduct->rowCount() !== 1) throw new RuntimeException('Estoque do produto mudou durante a confirmação.');
+                    }
                 }
             }
         }
+
+        $pdo->prepare("UPDATE site_pro_pagamentos
+            SET status = 'pago', pago_em = COALESCE(pago_em, NOW()), transaction_nsu = ?, invoice_slug = ?,
+                gateway_amount_centavos = ?, paid_amount_centavos = ?, installments = ?, capture_method = ?,
+                receipt_url = COALESCE(NULLIF(?, ''), receipt_url)
+            WHERE id = ?")
+            ->execute([$transactionNsu, $invoiceSlug, (int)$checkResult['amount'], (int)$checkResult['paid_amount'], $installments, $captureMethod ?: null, site_pro_valid_receipt_url($receiptUrl), $paymentId]);
+        $pdo->prepare("UPDATE vitrine_pedidos SET status = 'confirmado', pagamento_status = 'pago', pagamento_metodo = ? WHERE id = ? AND user_id = ?")
+            ->execute([$captureMethod ?: null, $orderId, $userId]);
 
         $shipping = (float)($order['valor_frete'] ?? 0);
         if ($shipping > 0) {
