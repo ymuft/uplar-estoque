@@ -5,6 +5,7 @@ require 'db.php';
 require 'helpers.php';
 require 'subscription.php';
 require_once __DIR__ . '/includes/tracking_runtime.php';
+require_once __DIR__ . '/includes/business_profile_runtime.php';
 
 if (!isset($_SESSION['user_id']) || !isset($_SESSION['username'])) {
     header("Location: login.php"); exit;
@@ -27,9 +28,32 @@ $wr = $wq->fetch();
 if ($wr) $whatsapp_number = $wr['whatsapp_number'] ?? '';
 
 // Busca usuários com dados de assinatura
+$avatarSelect = "'' AS avatar_path,";
+$avatarJoin = '';
+try {
+    $avatarColumn = $pdo->query("SHOW COLUMNS FROM vitrine_config LIKE 'logo_path'")->fetch(PDO::FETCH_ASSOC);
+    if ($avatarColumn) {
+        $avatarSelect = 'avatar.logo_path AS avatar_path,';
+        $avatarJoin = "LEFT JOIN (
+            SELECT user_id, MAX(logo_path) AS logo_path
+            FROM vitrine_config
+            GROUP BY user_id
+        ) avatar ON avatar.user_id = u.id";
+    }
+} catch (Throwable $e) {
+    // A ausência da fonte de avatar não deve impedir a listagem administrativa.
+}
+
 $usuarios = $pdo->query("
     SELECT u.id, u.username, u.role, u.whatsapp_number,
+        u.email,
         DATE_FORMAT(u.created_at, '%d/%m/%Y %H:%i') AS data_criacao,
+        $avatarSelect
+        CASE
+            WHEN u.passcode_required = 1 THEN 'pendente'
+            WHEN u.passcode_configured_at IS NOT NULL THEN 'configurado'
+            ELSE 'nao_configurado'
+        END AS passcode_state,
         COALESCE(p.total_produtos, 0) AS total_produtos,
         COALESCE(v.total_vendas, 0) AS total_vendas,
         COALESCE(v.receita_total, 0) AS receita_total,
@@ -47,12 +71,54 @@ $usuarios = $pdo->query("
         FROM vendas
         GROUP BY user_id
     ) v ON v.user_id = u.id
+    $avatarJoin
     ORDER BY u.id DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
+
+$segmentos_comerciais = [];
+try {
+    if (uplar_business_profile_schema_available($pdo)) {
+        $segmentos = $pdo->query("SELECT user_id, MAX(perfil_negocio_json) AS perfil_negocio_json FROM empresa_config GROUP BY user_id")->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($segmentos as $segmento) {
+            $perfil = uplar_business_profile_decode($segmento['perfil_negocio_json'] ?? null);
+            $preset = uplar_business_profile_get($perfil['segmento'] ?? null);
+            if ($preset && !empty($preset['nome'])) $segmentos_comerciais[(int)$segmento['user_id']] = (string)$preset['nome'];
+        }
+    }
+} catch (Throwable $e) {
+    error_log('[admin_usuarios] Falha ao carregar segmentos comerciais: ' . $e->getMessage());
+}
+
+function admin_safe_avatar_path(?string $path): string {
+    $path = trim((string)$path);
+    if (!preg_match('#^(?:imagens/vitrine|logos)/[a-zA-Z0-9._-]+\\.(?:jpe?g|png|webp)$#i', $path)) return '';
+    $root = realpath(__DIR__);
+    $allowedDirectory = str_starts_with($path, 'imagens/vitrine/') ? 'imagens/vitrine' : 'logos';
+    $allowedRoot = realpath(__DIR__ . '/' . $allowedDirectory);
+    $file = realpath(__DIR__ . '/' . $path);
+    if ($root === false || $allowedRoot === false || $file === false || !is_file($file)) return '';
+    if (!str_starts_with($allowedRoot, $root . DIRECTORY_SEPARATOR)
+        || !str_starts_with($file, $allowedRoot . DIRECTORY_SEPARATOR)) return '';
+    return $path;
+}
+
+function admin_avatar_html(array $user, string $class = ''): string {
+    $username = (string)($user['username'] ?? '');
+    $initials = mb_strtoupper(mb_substr($username, 0, 2));
+    $avatarPath = admin_safe_avatar_path($user['avatar_path'] ?? '');
+    $html = '<span class="admin-avatar ' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '" aria-label="Avatar de ' . htmlspecialchars($username, ENT_QUOTES, 'UTF-8') . '">';
+    $html .= '<span class="admin-avatar-fallback">' . htmlspecialchars($initials, ENT_QUOTES, 'UTF-8') . '</span>';
+    if ($avatarPath !== '') {
+        $html .= '<img class="admin-avatar-image" src="' . htmlspecialchars($avatarPath, ENT_QUOTES, 'UTF-8') . '" alt="" aria-hidden="true" onerror="this.remove()">';
+    }
+    return $html . '</span>';
+}
 
 // Calcula sub_status atual (expiração por data)
 $hoje = new DateTime('today');
 foreach ($usuarios as &$u) {
+    $u['avatar_path'] = admin_safe_avatar_path($u['avatar_path'] ?? '');
+    $u['segmento_comercial'] = $segmentos_comerciais[(int)$u['id']] ?? '';
     if ($u['role'] === 'admin') {
         $u['sub_status_calc'] = 'admin';
         $u['sub_dias']        = null;
@@ -263,7 +329,7 @@ function safe_infinitepay_receipt(?string $url): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Usuários — Uplar Admin</title>
+<title>Administração &amp; Gestão de Acessos — Uplar</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"/>
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
@@ -1297,6 +1363,7 @@ a{color:inherit;text-decoration:none} button{font-family:inherit;cursor:pointer}
 
 </style>
 <link rel="stylesheet" href="assets/app-theme.css?v=20260723">
+<link rel="stylesheet" href="assets/admin-access.css?v=20261016.4">
 <script src="assets/app-theme.js?v=20260723"></script>
 </head>
 <body>
@@ -1307,143 +1374,184 @@ a{color:inherit;text-decoration:none} button{font-family:inherit;cursor:pointer}
 
 <main class="main">
 <div class="admin-shell">
-    <header class="admin-page-head anim d1">
+<header class="admin-page-head anim d1">
         <div class="admin-title-wrap">
             <button class="ham" id="ham"><span class="material-symbols-outlined">menu</span></button>
             <div class="admin-title-icon"><span class="material-symbols-outlined">admin_panel_settings</span></div>
             <div>
-                <div class="admin-title">Administração</div>
-                <div class="admin-subtitle">Controle a receita de assinaturas da Uplar, acompanhe pagamentos e gerencie o acesso dos clientes em um único lugar.</div>
+                <div class="admin-title">Administração &amp; Gestão de Acessos</div>
+                <div class="admin-subtitle">Acompanhe assinaturas e pagamentos e gerencie as contas com segurança.</div>
             </div>
         </div>
         <div class="admin-head-actions">
-            <a href="estoque.php" class="admin-action"><span class="material-symbols-outlined">dashboard</span>Dashboard</a>
-            <a href="produtos.php" class="admin-action"><span class="material-symbols-outlined">inventory_2</span>Produtos</a>
-            <a href="vendedores.php" class="admin-action"><span class="material-symbols-outlined">groups</span>Vendedores</a>
             <button class="admin-action primary" id="btnNovoUser"><span class="material-symbols-outlined">person_add</span>Novo usuário</button>
         </div>
     </header>
 
-    <nav class="admin-local-nav anim d2" aria-label="Seções da administração">
-        <button class="admin-nav-link on" type="button" data-scroll-target="financeiro"><span class="material-symbols-outlined">monitoring</span>Visão financeira</button>
-        <button class="admin-nav-link" type="button" data-scroll-target="pagamentos"><span class="material-symbols-outlined">payments</span>Pagamentos</button>
-        <button class="admin-nav-link" type="button" data-scroll-target="usuarios"><span class="material-symbols-outlined">group</span>Usuários</button>
-    </nav>
-
-    <section class="finance-hero anim d3" id="financeiro">
-        <article class="finance-main">
-            <div class="finance-main-top">
-                <div>
-                    <div class="finance-kicker"><span class="material-symbols-outlined">query_stats</span>Receita Uplar</div>
-                    <h2>Assinaturas com pagamento confirmado</h2>
-                </div>
-                <div class="finance-updated"><strong><?= date('d/m/Y') ?></strong>Atualizado nesta visualização</div>
-            </div>
-
-            <div class="finance-primary">
-                <div class="finance-primary-label">Receita neste mês</div>
-                <div class="finance-primary-value"><?= money_from_cents($financeiro_saas['mes_centavos']) ?></div>
-                <div class="finance-primary-foot">
-                    <?php if($crescimento_mes !== null): ?>
-                        <span class="trend <?= $crescimento_mes >= 0 ? 'up' : 'down' ?>"><?= $crescimento_mes >= 0 ? '↑' : '↓' ?> <?= number_format(abs($crescimento_mes), 1, ',', '.') ?>%</span>
-                        em relação ao mês anterior
-                    <?php else: ?>
-                        Ainda não há base no mês anterior para comparação.
-                    <?php endif; ?>
-                </div>
-            </div>
-
-            <div class="finance-mini-grid">
-                <div class="finance-mini">
-                    <div class="finance-mini-label">Total histórico</div>
-                    <div class="finance-mini-value"><?= money_from_cents($financeiro_saas['total_centavos']) ?></div>
-                </div>
-                <div class="finance-mini">
-                    <div class="finance-mini-label">Últimos 30 dias</div>
-                    <div class="finance-mini-value"><?= money_from_cents($financeiro_saas['ultimos_30_centavos']) ?></div>
-                </div>
-                <div class="finance-mini">
-                    <div class="finance-mini-label">Mês anterior</div>
-                    <div class="finance-mini-value"><?= money_from_cents($financeiro_saas['mes_anterior_centavos']) ?></div>
-                </div>
-            </div>
-        </article>
-
-        <aside class="finance-health">
-            <div class="finance-health-head">
-                <div>
-                    <div class="finance-health-title">Saúde da operação</div>
-                    <div class="finance-health-sub">Assinaturas, checkout e base ativa</div>
-                </div>
-                <span class="health-icon"><span class="material-symbols-outlined">monitor_heart</span></span>
-            </div>
-            <div class="health-list">
-                <div class="health-row">
-                    <span class="health-dot ok"></span>
-                    <span class="health-name">Assinaturas ativas</span>
-                    <span class="health-val"><?= number_format($sub_ativas, 0, ',', '.') ?></span>
-                </div>
-                <div class="health-row">
-                    <span class="health-dot <?= $sub_expirando > 0 ? 'warn' : 'ok' ?>"></span>
-                    <span class="health-name">Vencem em até 7 dias</span>
-                    <span class="health-val"><?= number_format($sub_expirando, 0, ',', '.') ?></span>
-                </div>
-                <div class="health-row">
-                    <span class="health-dot <?= $taxa_conversao >= 50 ? 'ok' : ($taxa_conversao > 0 ? 'warn' : 'err') ?>"></span>
-                    <span class="health-name">Conversão de checkouts</span>
-                    <span class="health-val"><?= number_format($taxa_conversao, 1, ',', '.') ?>%</span>
-                    <div class="health-progress"><span style="width:<?= min(100, max(0, $taxa_conversao)) ?>%"></span></div>
-                </div>
-                <div class="health-row">
-                    <span class="health-dot <?= $financeiro_saas['checkouts_pendentes'] > 0 ? 'warn' : 'ok' ?>"></span>
-                    <span class="health-name">Checkouts pendentes</span>
-                    <span class="health-val"><?= number_format($financeiro_saas['checkouts_pendentes'], 0, ',', '.') ?></span>
-                </div>
-            </div>
-            <div class="finance-note"><span class="material-symbols-outlined">info</span><span>Os valores desta área são exclusivamente da receita de assinaturas da Uplar. As vendas das lojas aparecem apenas na gestão de cada cliente.</span></div>
-        </aside>
+    <section class="access-kpis anim d2" id="financeiro" aria-label="Indicadores administrativos">
+        <article class="access-kpi"><div class="access-kpi-top"><span>Receita de assinaturas no mês</span><span class="material-symbols-outlined">payments</span></div><strong><?= money_from_cents($financeiro_saas['mes_centavos']) ?></strong><small><?= $crescimento_mes !== null ? (($crescimento_mes >= 0 ? '↑ ' : '↓ ') . number_format(abs($crescimento_mes), 1, ',', '.') . '% sobre o mês anterior') : 'Recebimentos confirmados neste mês' ?></small></article>
+        <article class="access-kpi"><div class="access-kpi-top"><span>Contas ativas</span><span class="material-symbols-outlined">group</span></div><strong><?= number_format($sub_ativas, 0, ',', '.') ?></strong><small>com assinatura vigente</small></article>
+        <article class="access-kpi"><div class="access-kpi-top"><span>Ticket médio</span><span class="material-symbols-outlined">sell</span></div><strong><?= money_from_cents($financeiro_saas['ticket_medio_centavos']) ?></strong><small>por pagamento aprovado</small></article>
+        <article class="access-kpi <?= $sub_expirando > 0 ? 'warn' : '' ?>"><div class="access-kpi-top"><span>Vencem em até 7 dias</span><span class="material-symbols-outlined">event_upcoming</span></div><strong><?= number_format($sub_expirando, 0, ',', '.') ?></strong><small>assinaturas próximas do vencimento</small></article>
     </section>
 
-    <section class="admin-metrics anim d3" aria-label="Indicadores operacionais">
-        <article class="admin-metric">
-            <span class="admin-metric-ico"><span class="material-symbols-outlined">sell</span></span>
-            <div><div class="admin-metric-label">Ticket médio</div><div class="admin-metric-value"><?= money_from_cents($financeiro_saas['ticket_medio_centavos']) ?></div><div class="admin-metric-meta">por pagamento aprovado</div></div>
-        </article>
-        <article class="admin-metric ok">
-            <span class="admin-metric-ico"><span class="material-symbols-outlined">task_alt</span></span>
-            <div><div class="admin-metric-label">Pagamentos aprovados</div><div class="admin-metric-value"><?= number_format($financeiro_saas['pagamentos_aprovados'], 0, ',', '.') ?></div><div class="admin-metric-meta">desde o início da operação</div></div>
-        </article>
-        <article class="admin-metric violet">
-            <span class="admin-metric-ico"><span class="material-symbols-outlined">group</span></span>
-            <div><div class="admin-metric-label">Clientes cadastrados</div><div class="admin-metric-value"><?= number_format($regular, 0, ',', '.') ?></div><div class="admin-metric-meta"><?= number_format($total, 0, ',', '.') ?> contas incluindo admins</div></div>
-        </article>
-        <article class="admin-metric <?= $sub_alerta > 0 ? 'warn' : 'ok' ?>">
-            <span class="admin-metric-ico"><span class="material-symbols-outlined">notification_important</span></span>
-            <div><div class="admin-metric-label">Atenção de assinatura</div><div class="admin-metric-value"><?= number_format($sub_alerta, 0, ',', '.') ?></div><div class="admin-metric-meta">sem assinatura ou expirados</div></div>
-        </article>
+    <section class="access-secondary anim d2" aria-label="Outros indicadores financeiros">
+        <div><span>Receita histórica</span><strong><?= money_from_cents($financeiro_saas['total_centavos']) ?></strong></div>
+        <div><span>Últimos 30 dias</span><strong><?= money_from_cents($financeiro_saas['ultimos_30_centavos']) ?></strong></div>
+        <div><span>Mês anterior</span><strong><?= money_from_cents($financeiro_saas['mes_anterior_centavos']) ?></strong></div>
+        <div><span>Pagamentos aprovados</span><strong><?= number_format($financeiro_saas['pagamentos_aprovados'], 0, ',', '.') ?></strong></div>
+        <div><span>Conversão de checkout</span><strong><?= number_format($taxa_conversao, 1, ',', '.') ?>%</strong></div>
+        <div><span>Checkouts pendentes</span><strong><?= number_format($financeiro_saas['checkouts_pendentes'], 0, ',', '.') ?></strong></div>
+        <div><span>Clientes cadastrados</span><strong><?= number_format($regular, 0, ',', '.') ?></strong></div>
+        <div><span>Sem plano ou vencidas</span><strong><?= number_format($sub_alerta, 0, ',', '.') ?></strong></div>
     </section>
 
     <section class="fin-grid anim d4" aria-label="Análise financeira">
         <div class="fin-card">
             <div class="fin-card-head"><div><div class="fin-card-title">Evolução da receita</div><div class="fin-card-sub">Pagamentos confirmados nos últimos seis meses</div></div><span class="fin-total-chip">6 meses</span></div>
             <div id="revenueChart" class="revenue-chart" role="img" aria-label="Gráfico da receita de assinaturas nos últimos seis meses"></div>
+            <div class="recent-payments">
+                <div class="breakdown-title">Pagamentos recentes confirmados</div>
+                <?php if ($pagamentos_recentes): foreach (array_slice($pagamentos_recentes, 0, 3) as $pagamento): ?>
+                <div class="recent-payment-row">
+                    <div><strong><?= htmlspecialchars($pagamento['username'] ?: 'Usuário removido', ENT_QUOTES, 'UTF-8') ?></strong><span><?= htmlspecialchars(plan_label($pagamento['plano_key']), ENT_QUOTES, 'UTF-8') ?> · <?= htmlspecialchars(payment_method_label($pagamento['capture_method']), ENT_QUOTES, 'UTF-8') ?></span></div>
+                    <strong><?= money_from_cents((int)$pagamento['valor_centavos']) ?></strong>
+                    <time><?= htmlspecialchars($pagamento['pago_em_fmt'] ?: '—', ENT_QUOTES, 'UTF-8') ?></time>
+                </div>
+                <?php endforeach; else: ?><div class="fin-card-sub">Nenhum pagamento confirmado recentemente.</div><?php endif; ?>
+            </div>
         </div>
-        <div class="fin-card">
-            <div class="fin-card-head"><div><div class="fin-card-title">Composição da receita</div><div class="fin-card-sub">Origem dos pagamentos aprovados</div></div></div>
-            <div class="breakdown-section">
-                <div class="breakdown-title">Por plano</div>
+        <aside class="fin-card access-security-card">
+            <div class="fin-card-head"><div><div class="fin-card-title">Segurança e comandos</div><div class="fin-card-sub">Controles administrativos disponíveis por conta</div></div><span class="security-icon material-symbols-outlined" aria-hidden="true">admin_panel_settings</span></div>
+            <a class="security-control" href="#usuarios"><span class="material-symbols-outlined">key</span><div><strong>Redefinir senha</strong><small>Escolha uma conta para alterar a senha</small></div><span class="material-symbols-outlined security-arrow">arrow_forward</span></a>
+            <a class="security-control" href="#usuarios"><span class="material-symbols-outlined">pin</span><div><strong>Resetar Pass Code</strong><small>Selecione um usuário para redefinir o Pass Code</small></div><span class="material-symbols-outlined security-arrow">arrow_forward</span></a>
+            <a class="security-control" href="#usuarios"><span class="material-symbols-outlined">manage_accounts</span><div><strong>Permissões e contas</strong><small>Selecione um usuário para gerenciar o acesso</small></div><span class="material-symbols-outlined security-arrow">arrow_forward</span></a>
+            <p class="security-note"><span class="material-symbols-outlined">verified_user</span>Selecione uma conta para acessar as ações administrativas disponíveis.</p>
+            <a class="security-link" href="#usuarios">Abrir gestão de usuários <span class="material-symbols-outlined">arrow_downward</span></a>
+        </aside>
+    </section>
+
+    <div class="section-band anim d4" id="usuarios">
+        <div>
+            <div class="section-band-title">Gestão de usuários</div>
+            <div class="section-band-sub">Contas, acessos, assinaturas e indicadores das lojas clientes.</div>
+        </div>
+        <span class="section-count"><?= number_format($total, 0, ',', '.') ?> contas</span>
+    </div>
+
+    <div class="card users-card anim d4">
+        <div class="users-toolbar">
+            <div class="users-toolbar-left">
+                <div>
+                    <div class="users-toolbar-title">Usuários do sistema</div>
+                    <div class="users-toolbar-meta"><span id="userVisibleCount"><?= number_format($total, 0, ',', '.') ?></span> exibidos</div>
+                </div>
+            </div>
+            <div class="users-toolbar-right">
+                <div class="searchbox users-search">
+                    <span class="material-symbols-outlined">search</span>
+                    <input id="busca" placeholder="Buscar usuário, e-mail, telefone ou ID…" type="search" autocomplete="off">
+                </div>
+                <div class="view-tog" aria-label="Modo de visualização">
+                    <button class="vt-btn on" id="vGrid" title="Cards" aria-label="Mostrar usuários em cards"><span class="material-symbols-outlined">grid_view</span></button>
+                    <button class="vt-btn" id="vList" title="Tabela" aria-label="Mostrar usuários em tabela"><span class="material-symbols-outlined">view_list</span></button>
+                </div>
+                <span class="users-responsive-note" role="status">Cards mantêm segurança e ações visíveis nesta largura.</span>
+            </div>
+        </div>
+        <div class="filters">
+            <button class="filter-btn on" data-f="all" aria-pressed="true">Todos <span class="filter-count"><?= $total ?></span></button>
+            <button class="filter-btn" data-f="admin">Admins <span class="filter-count"><?= $admins ?></span></button>
+            <button class="filter-btn" data-f="user">Regulares <span class="filter-count"><?= $regular ?></span></button>
+            <button class="filter-btn" data-f="ativa">Assinatura ativa <span class="filter-count"><?= $sub_ativas ?></span></button>
+            <button class="filter-btn" data-f="alerta">Sem/Expirada <span class="filter-count"><?= $sub_alerta ?></span></button>
+        </div>
+        <div class="user-empty-filter" id="userEmptyFilter"><span class="material-symbols-outlined" style="display:block;font-size:1.6rem;margin-bottom:.35rem">person_search</span>Nenhum usuário corresponde aos filtros atuais.</div>
+
+        <div class="ug" id="ug">
+            <?php foreach($usuarios as $i=>$u):
+                $isMe   = $u['id'] == $user_id;
+                $isAdm  = $u['role'] === 'admin';
+                $avCls  = $isMe ? 'm' : ($isAdm ? 'a' : '');
+                $cardCls= $isMe ? 'me-card' : ($isAdm ? 'admin-card' : '');
+                $delay  = min($i * .04, .4);
+                $sCalc  = $u['sub_status_calc'];
+                $passcodeState = $u['passcode_state'] ?? '';
+                $passcodeLabel = $passcodeState === 'configurado' ? 'Pass Code configurado' : ($passcodeState === 'pendente' ? 'Configuração pendente' : 'Pass Code não configurado');
+                $passcodeClass = $passcodeState === 'configurado' ? 'configured' : ($passcodeState === 'pendente' ? 'pending' : 'neutral');
+                $passcodeIcon = $passcodeState === 'configurado' ? 'check_circle' : ($passcodeState === 'pendente' ? 'warning' : 'remove_circle');
+            ?>
+            <div class="uc <?= $cardCls ?>"
+                 data-role="<?= $u['role'] ?>"
+                 data-search="<?= htmlspecialchars(mb_strtolower(implode(' ', [$u['username'], $u['email'] ?? '', $u['whatsapp_number'] ?? '', $u['id']])), ENT_QUOTES, 'UTF-8') ?>"
+                 data-sub="<?= $sCalc ?>"
+                 style="animation-delay:<?= $delay ?>s">
+                <div class="uc-top">
+                    <?= admin_avatar_html($u, 'uc-av ' . $avCls) ?>
+                    <div class="uc-ident">
+                        <div class="uc-name">
+                            <?= htmlspecialchars($u['username']) ?>
+                            <span class="rbadge <?= $u['role'] ?>"><?= $isAdm?'Admin':'User' ?></span>
+                            <?php if($isMe):?><span class="me-badge">você</span><?php endif;?>
+                        </div>
+                        <div class="uc-subline"><span class="material-symbols-outlined">schedule</span><?= htmlspecialchars($u['email'] ?: ('Conta criada em ' . ($u['data_criacao'] ?? '—')), ENT_QUOTES, 'UTF-8') ?></div>
+                    </div>
+                    <div class="uc-status"><?= sub_badge($u) ?></div>
+                </div>
+                <div class="uc-stats">
+                    <div class="uc-stat"><div class="uc-stat-v"><?= $u['total_produtos'] ?></div><div class="uc-stat-l">Produtos</div></div>
+                    <div class="uc-stat"><div class="uc-stat-v"><?= $u['total_vendas'] ?></div><div class="uc-stat-l">Vendas</div></div>
+                    <div class="uc-stat"><div class="uc-stat-v">R$ <?= number_format($u['receita_total'],0,'.','.') ?></div><div class="uc-stat-l">Receita da loja</div></div>
+                </div>
+                <div class="uc-security-row">
+                    <span class="uc-security-label">Segurança / Acesso</span>
+                    <span class="role-state <?= $isAdm?'admin':'user' ?>"><?= $isAdm?'Admin':'Usuário' ?></span>
+                    <span class="access-state <?= $passcodeClass ?>"><span class="material-symbols-outlined"><?= $passcodeIcon ?></span><?= htmlspecialchars($passcodeLabel, ENT_QUOTES, 'UTF-8') ?></span>
+                </div>
+                <div class="uc-acts">
+                    <button class="uc-btn uc-info" onclick="openDetails(<?= $u['id'] ?>)"><span class="material-symbols-outlined">manage_search</span>Detalhes</button>
+                    <?php if(!$isAdm):?>
+                    <button class="uc-btn uc-sub-btn" onclick="openSub(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>','<?= htmlspecialchars($u['sub_data_fim'] ?? '',ENT_QUOTES) ?>','<?= $u['sub_status_calc'] ?>')"><span class="material-symbols-outlined">card_membership</span>Assinatura</button>
+                    <?php endif;?>
+                    <button class="uc-btn uc-pw" onclick="openPw(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>')"><span class="material-symbols-outlined">lock_reset</span>Senha</button>
+                    <button class="uc-btn uc-pw" onclick="resetPasscode(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>')"><span class="material-symbols-outlined">shield_lock</span>Pass Code</button>
+                    <?php if(!$isMe):?>
+                    <button class="uc-btn uc-role" onclick="openRole(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>','<?= $u['role'] ?>')"><span class="material-symbols-outlined">manage_accounts</span>Acesso</button>
+                    <button class="uc-btn uc-del"  onclick="openDel(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>')"><span class="material-symbols-outlined">delete</span>Excluir</button>
+                    <?php endif;?>
+                </div>
+            </div>
+            <?php endforeach;?>
+        </div>
+
+        <div class="tbl-wrap admin-users-table-wrap" id="tbl" style="display:none">
+            <table class="tbl admin-users-table">
+                <thead><tr><th>Loja / Usuário</th><th>Segmento</th><th>Produtos</th><th>Vendas</th><th>Receita da loja</th><th>Assinatura</th><th>Segurança / Acesso</th><th>Ações</th></tr></thead>
+                <tbody id="tblBody"></tbody>
+            </table>
+        </div>
+        <div class="users-pagination" id="usersPagination" aria-label="Paginação de usuários">
+            <span id="usersPageSummary" aria-live="polite"></span>
+            <div><button type="button" id="usersPrev" disabled>Anterior</button><span id="usersPageNumber">1 / 1</span><button type="button" id="usersNext" disabled>Próxima</button></div>
+        </div>
+    </div>
+
+
+    <section class="fin-card breakdown-card anim d4" aria-label="Composição da receita">
+        <div class="fin-card-head"><div><div class="fin-card-title">Composição da receita</div><div class="fin-card-sub">Pagamentos confirmados por plano e método</div></div></div>
+        <div class="breakdown-grid">
+            <div class="breakdown-section"><div class="breakdown-title">Por plano</div>
                 <?php if($receita_planos): foreach($receita_planos as $plano):
                     $participacao = $financeiro_saas['total_centavos'] > 0 ? ((int)$plano['total_centavos'] / $financeiro_saas['total_centavos']) * 100 : 0;
                 ?>
-                <div class="breakdown-row"><div class="breakdown-top"><span class="breakdown-name"><?= htmlspecialchars(plan_label($plano['plano_key'])) ?></span><span class="breakdown-amount"><?= money_from_cents((int)$plano['total_centavos']) ?></span></div><div class="breakdown-meta"><?= (int)$plano['pagamentos'] ?> pagamento(s) · <?= number_format($participacao, 1, ',', '.') ?>%</div><div class="breakdown-track"><div class="breakdown-fill" style="width:<?= min(100, $participacao) ?>%"></div></div></div>
+                <div class="breakdown-row"><div class="breakdown-top"><span class="breakdown-name"><?= htmlspecialchars(plan_label($plano['plano_key']), ENT_QUOTES, 'UTF-8') ?></span><span class="breakdown-amount"><?= money_from_cents((int)$plano['total_centavos']) ?></span></div><div class="breakdown-meta"><?= (int)$plano['pagamentos'] ?> pagamento(s) · <?= number_format($participacao, 1, ',', '.') ?>%</div><div class="breakdown-track"><div class="breakdown-fill" style="width:<?= min(100, $participacao) ?>%"></div></div></div>
                 <?php endforeach; else: ?><div class="fin-card-sub">Nenhum pagamento aprovado.</div><?php endif; ?>
             </div>
-            <div class="breakdown-section">
-                <div class="breakdown-title">Por método</div>
+            <div class="breakdown-section"><div class="breakdown-title">Por método</div>
                 <?php if($receita_metodos): foreach($receita_metodos as $metodo):
                     $participacao = $financeiro_saas['total_centavos'] > 0 ? ((int)$metodo['total_centavos'] / $financeiro_saas['total_centavos']) * 100 : 0;
                 ?>
-                <div class="breakdown-row"><div class="breakdown-top"><span class="breakdown-name"><?= htmlspecialchars(payment_method_label($metodo['metodo'])) ?></span><span class="breakdown-amount"><?= money_from_cents((int)$metodo['total_centavos']) ?></span></div><div class="breakdown-meta"><?= (int)$metodo['pagamentos'] ?> pagamento(s)</div><div class="breakdown-track"><div class="breakdown-fill gold" style="width:<?= min(100, $participacao) ?>%"></div></div></div>
+                <div class="breakdown-row"><div class="breakdown-top"><span class="breakdown-name"><?= htmlspecialchars(payment_method_label($metodo['metodo']), ENT_QUOTES, 'UTF-8') ?></span><span class="breakdown-amount"><?= money_from_cents((int)$metodo['total_centavos']) ?></span></div><div class="breakdown-meta"><?= (int)$metodo['pagamentos'] ?> pagamento(s)</div><div class="breakdown-track"><div class="breakdown-fill gold" style="width:<?= min(100, $participacao) ?>%"></div></div></div>
                 <?php endforeach; else: ?><div class="fin-card-sub">Nenhum método registrado.</div><?php endif; ?>
             </div>
         </div>
@@ -1491,98 +1599,6 @@ a{color:inherit;text-decoration:none} button{font-family:inherit;cursor:pointer}
             </tbody></table></div>
         </div>
     </section>
-
-    <div class="section-band anim d4" id="usuarios">
-        <div>
-            <div class="section-band-title">Gestão de usuários</div>
-            <div class="section-band-sub">Contas, acessos, assinaturas e indicadores das lojas clientes.</div>
-        </div>
-        <span class="section-count"><?= number_format($total, 0, ',', '.') ?> contas</span>
-    </div>
-
-    <div class="card users-card anim d4">
-        <div class="users-toolbar">
-            <div class="users-toolbar-left">
-                <div>
-                    <div class="users-toolbar-title">Usuários do sistema</div>
-                    <div class="users-toolbar-meta"><span id="userVisibleCount"><?= number_format($total, 0, ',', '.') ?></span> exibidos</div>
-                </div>
-            </div>
-            <div class="users-toolbar-right">
-                <div class="searchbox users-search">
-                    <span class="material-symbols-outlined">search</span>
-                    <input id="busca" placeholder="Buscar usuário…" type="text" autocomplete="off">
-                </div>
-                <div class="view-tog" aria-label="Modo de visualização">
-                    <button class="vt-btn on" id="vGrid" title="Cards"><span class="material-symbols-outlined">grid_view</span></button>
-                    <button class="vt-btn" id="vList" title="Lista"><span class="material-symbols-outlined">view_list</span></button>
-                </div>
-            </div>
-        </div>
-        <div class="filters">
-            <button class="filter-btn on" data-f="all">Todos <span class="filter-count"><?= $total ?></span></button>
-            <button class="filter-btn" data-f="admin">Admins <span class="filter-count"><?= $admins ?></span></button>
-            <button class="filter-btn" data-f="user">Regulares <span class="filter-count"><?= $regular ?></span></button>
-            <button class="filter-btn" data-f="ativa">Assinatura ativa <span class="filter-count"><?= $sub_ativas ?></span></button>
-            <button class="filter-btn" data-f="alerta">Sem/Expirada <span class="filter-count"><?= $sub_alerta ?></span></button>
-        </div>
-        <div class="user-empty-filter" id="userEmptyFilter"><span class="material-symbols-outlined" style="display:block;font-size:1.6rem;margin-bottom:.35rem">person_search</span>Nenhum usuário corresponde aos filtros atuais.</div>
-
-        <div class="ug" id="ug">
-            <?php foreach($usuarios as $i=>$u):
-                $isMe   = $u['id'] == $user_id;
-                $isAdm  = $u['role'] === 'admin';
-                $ini    = mb_strtoupper(mb_substr($u['username'],0,2));
-                $avCls  = $isMe ? 'm' : ($isAdm ? 'a' : '');
-                $cardCls= $isMe ? 'me-card' : ($isAdm ? 'admin-card' : '');
-                $delay  = min($i * .04, .4);
-                $sCalc  = $u['sub_status_calc'];
-            ?>
-            <div class="uc <?= $cardCls ?>"
-                 data-role="<?= $u['role'] ?>"
-                 data-name="<?= htmlspecialchars(strtolower($u['username'])) ?>"
-                 data-sub="<?= $sCalc ?>"
-                 style="animation-delay:<?= $delay ?>s">
-                <div class="uc-top">
-                    <div class="uc-av <?= $avCls ?>"><?= $ini ?></div>
-                    <div class="uc-ident">
-                        <div class="uc-name">
-                            <?= htmlspecialchars($u['username']) ?>
-                            <span class="rbadge <?= $u['role'] ?>"><?= $isAdm?'Admin':'User' ?></span>
-                            <?php if($isMe):?><span class="me-badge">você</span><?php endif;?>
-                        </div>
-                        <div class="uc-subline"><span class="material-symbols-outlined">schedule</span>Conta criada em <?= $u['data_criacao']??'—' ?></div>
-                    </div>
-                    <div class="uc-status"><?= sub_badge($u) ?></div>
-                </div>
-                <div class="uc-stats">
-                    <div class="uc-stat"><div class="uc-stat-v"><?= $u['total_produtos'] ?></div><div class="uc-stat-l">Produtos</div></div>
-                    <div class="uc-stat"><div class="uc-stat-v"><?= $u['total_vendas'] ?></div><div class="uc-stat-l">Vendas</div></div>
-                    <div class="uc-stat"><div class="uc-stat-v">R$ <?= number_format($u['receita_total'],0,'.','.') ?></div><div class="uc-stat-l">Receita da loja</div></div>
-                </div>
-                <div class="uc-acts">
-                    <button class="uc-btn uc-info" onclick="openDetails(<?= $u['id'] ?>)"><span class="material-symbols-outlined">manage_search</span>Detalhes</button>
-                    <?php if(!$isAdm):?>
-                    <button class="uc-btn uc-sub-btn" onclick="openSub(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>','<?= htmlspecialchars($u['sub_data_fim'] ?? '',ENT_QUOTES) ?>','<?= $u['sub_status_calc'] ?>')"><span class="material-symbols-outlined">card_membership</span>Assinatura</button>
-                    <?php endif;?>
-                    <button class="uc-btn uc-pw" onclick="openPw(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>')"><span class="material-symbols-outlined">lock_reset</span>Senha</button>
-                    <button class="uc-btn uc-pw" onclick="resetPasscode(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>')"><span class="material-symbols-outlined">shield_lock</span>Pass Code</button>
-                    <?php if(!$isMe):?>
-                    <button class="uc-btn uc-role" onclick="openRole(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>','<?= $u['role'] ?>')"><span class="material-symbols-outlined">manage_accounts</span>Acesso</button>
-                    <button class="uc-btn uc-del"  onclick="openDel(<?= $u['id'] ?>,'<?= htmlspecialchars($u['username'],ENT_QUOTES) ?>')"><span class="material-symbols-outlined">delete</span>Excluir</button>
-                    <?php endif;?>
-                </div>
-            </div>
-            <?php endforeach;?>
-        </div>
-
-        <div class="tbl-wrap" id="tbl" style="display:none">
-            <table class="tbl">
-                <thead><tr><th>Usuário</th><th>Role</th><th>Assinatura</th><th>Produtos</th><th>Vendas</th><th>Receita loja</th><th>Ações</th></tr></thead>
-                <tbody id="tblBody"></tbody>
-            </table>
-        </div>
-    </div>
 
 </div><!-- /.admin-shell -->
 </main>
@@ -1920,7 +1936,7 @@ function cnt(el,to,fmt){
     requestAnimationFrame(t);
 }
 
-const UJ = <?= json_encode($usuarios,JSON_UNESCAPED_UNICODE) ?>;
+const UJ = <?= json_encode($usuarios, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 window.addEventListener('load',()=>{
     if(window.UplarTracker){
         window.UplarTracker.trackEvent('view_admin_users', { origem: 'admin_usuarios' }, 'navigation');
@@ -1941,14 +1957,25 @@ const sb=$('sb'),ov=$('ov');
 $('ham').addEventListener('click',()=>{sb.classList.add('open');ov.classList.add('on');document.body.style.overflow='hidden'});
 ov.addEventListener('click',()=>{sb.classList.remove('open');ov.classList.remove('on');document.body.style.overflow=''});
 
-/* view toggle */
-let viewMode='grid';
-$('vGrid').addEventListener('click',()=>setView('grid'));
-$('vList').addEventListener('click',()=>setView('list'));
-function setView(v){
+/* Em larguras menores, use os cards para manter segurança e ações no viewport. */
+const compactUsersView=window.matchMedia('(max-width:1380px)');
+let manualUsersView=false;
+let viewMode=compactUsersView.matches?'grid':'list';
+$('vGrid').addEventListener('click',()=>setView('grid',true));
+$('vList').addEventListener('click',()=>setView('list',true));
+compactUsersView.addEventListener('change',event=>{
+    if(event.matches) setView('grid');
+    else if(!manualUsersView) setView('list');
+});
+function setView(v,manual=false){
+    if(manual) manualUsersView=true;
+    if(compactUsersView.matches) v='grid';
     viewMode=v;
+    currentPage=1;
     $('vGrid').classList.toggle('on',v==='grid');
     $('vList').classList.toggle('on',v==='list');
+    $('vGrid').setAttribute('aria-pressed',String(v==='grid'));
+    $('vList').setAttribute('aria-pressed',String(v==='list'));
     $('ug').style.display=v==='grid'?'grid':'none';
     $('tbl').style.display=v==='list'?'block':'none';
     if($('userEmptyFilter')) $('userEmptyFilter').classList.remove('on');
@@ -1957,31 +1984,48 @@ function setView(v){
 }
 
 /* filtros */
-let af='all';
+const activeRoles=new Set(),activeStatuses=new Set();
 document.querySelectorAll('.filter-btn').forEach(b=>{
     b.addEventListener('click',()=>{
-        document.querySelectorAll('.filter-btn').forEach(x=>x.classList.remove('on'));
-        b.classList.add('on'); af=b.dataset.f; applyF();
+        const filter=b.dataset.f;
+        if(filter==='all'){activeRoles.clear();activeStatuses.clear();}
+        else{
+            const group=['admin','user'].includes(filter)?activeRoles:activeStatuses;
+            group.has(filter)?group.delete(filter):group.add(filter);
+        }
+        document.querySelectorAll('.filter-btn').forEach(item=>{
+            const f=item.dataset.f;
+            const selected=f==='all'?!activeRoles.size&&!activeStatuses.size:(activeRoles.has(f)||activeStatuses.has(f));
+            item.classList.toggle('on',selected);item.setAttribute('aria-pressed',String(selected));
+        });
+        currentPage=1;applyF();
     });
 });
-$('busca').addEventListener('input',applyF);
+document.querySelectorAll('.filter-btn').forEach(item=>item.setAttribute('aria-pressed',String(item.classList.contains('on'))));
+$('busca').addEventListener('input',()=>{currentPage=1;applyF()});
+function userMatchesFilters(u){
+    const roleMatch=!activeRoles.size||activeRoles.has(u.role);
+    const statusMatch=!activeStatuses.size||(
+        (activeStatuses.has('ativa')&&u.sub_status_calc==='ativa')
+        ||(activeStatuses.has('alerta')&&['expirada','sem_inscricao'].includes(u.sub_status_calc))
+    );
+    const query=$('busca').value.toLocaleLowerCase('pt-BR').trim();
+    const searchText=String(u.search||[u.username,u.email,u.whatsapp_number,u.id].filter(Boolean).join(' ')).toLocaleLowerCase('pt-BR');
+    return roleMatch&&statusMatch&&(!query||searchText.includes(query));
+}
 function applyF(){
-    const t=$('busca').value.toLowerCase().trim();
-    let visible=0;
-    document.querySelectorAll('.uc').forEach(el=>{
-        const role=el.dataset.role, sub=el.dataset.sub;
-        const mF=af==='all'
-            ||(af==='admin'&&role==='admin')
-            ||(af==='user'&&role==='user')
-            ||(af==='ativa'&&sub==='ativa')
-            ||(af==='alerta'&&['expirada','sem_inscricao'].includes(sub));
-        const mS=!t||(el.dataset.name||'').includes(t);
-        const show=mF&&mS;
-        el.style.display=show?'':'none';
-        if(show) visible++;
-    });
-    if($('userVisibleCount')) $('userVisibleCount').textContent=visible.toLocaleString('pt-BR');
-    if($('userEmptyFilter')) $('userEmptyFilter').classList.toggle('on', visible===0 && viewMode==='grid');
+    const cards=[...document.querySelectorAll('.uc')];
+    const matching=cards.filter(el=>userMatchesFilters({role:el.dataset.role,sub_status_calc:el.dataset.sub,search:el.dataset.search}));
+    const pages=Math.max(1,Math.ceil(matching.length/PAGE_SIZE));
+    currentPage=Math.min(currentPage,pages);
+    const start=(currentPage-1)*PAGE_SIZE,end=start+PAGE_SIZE;
+    const pageItems=new Set(matching.slice(start,end));
+    cards.forEach(el=>{el.style.display=pageItems.has(el)?'':'none'});
+    if($('userVisibleCount')) $('userVisibleCount').textContent=matching.length.toLocaleString('pt-BR');
+    if($('userEmptyFilter')) $('userEmptyFilter').classList.toggle('on', matching.length===0 && viewMode==='grid');
+    $('usersPageSummary').textContent=matching.length?`Mostrando ${start+1}–${Math.min(end,matching.length)} de ${matching.length} contas`:'Nenhuma conta para exibir';
+    $('usersPageNumber').textContent=`${currentPage} / ${pages}`;
+    $('usersPrev').disabled=currentPage<=1;$('usersNext').disabled=currentPage>=pages;
     if(viewMode==='list') renderTable();
 }
 
@@ -2001,28 +2045,38 @@ function subBadgeHTML(u){
 }
 function fmtDateBR(d){if(!d)return '—';const p=d.split('-');return p.length===3?p[2]+'/'+p[1]+'/'+p[0]:d;}
 
+function avatarHTML(u,extraClass=''){
+    const name=String(u.username||''),initials=esc(name.slice(0,2).toLocaleUpperCase('pt-BR'));
+    const src=String(u.avatar_path||'');
+    const image=src?`<img class="admin-avatar-image" src="${esc(src)}" alt="" aria-hidden="true" onerror="this.remove()">`:'';
+    return `<span class="admin-avatar ${extraClass}" aria-label="Avatar de ${esc(name)}"><span class="admin-avatar-fallback">${initials}</span>${image}</span>`;
+}
+
+let currentPage=1;
+const PAGE_SIZE=25;
+function filteredUsers(){return UJ.filter(userMatchesFilters)}
 function renderTable(){
-    const t=$('busca').value.toLowerCase().trim(), tb=$('tblBody');
+    const tb=$('tblBody'),users=filteredUsers(),pages=Math.max(1,Math.ceil(users.length/PAGE_SIZE));
+    currentPage=Math.min(currentPage,pages);
+    const start=(currentPage-1)*PAGE_SIZE,rows=users.slice(start,start+PAGE_SIZE);
     tb.innerHTML='';
-    UJ.filter(u=>{
-        const mF=af==='all'
-            ||(af==='admin'&&u.role==='admin')
-            ||(af==='user'&&u.role==='user')
-            ||(af==='ativa'&&u.sub_status_calc==='ativa')
-            ||(af==='alerta'&&['expirada','sem_inscricao'].includes(u.sub_status_calc));
-        return mF&&(!t||u.username.toLowerCase().includes(t));
-    }).forEach(u=>{
+    rows.forEach(u=>{
         const isMe=u.id==ME_ID,isAdm=u.role==='admin';
-        const bg=isMe?'linear-gradient(135deg,var(--ok),#34d399)':isAdm?'linear-gradient(135deg,var(--violet),#a855f7)':'linear-gradient(135deg,var(--p),#7ca0ff)';
         const tr=document.createElement('tr');
+        const passcode=u.passcode_state==='configurado'
+            ? '<span class="access-state configured"><span class="material-symbols-outlined">check_circle</span>Pass Code configurado</span>'
+            : u.passcode_state==='pendente'
+                ? '<span class="access-state pending"><span class="material-symbols-outlined">warning</span>Configuração pendente</span>'
+                : '<span class="access-state neutral"><span class="material-symbols-outlined">remove_circle</span>Pass Code não configurado</span>';
         tr.innerHTML=`
             <td><div class="tbl-cell">
-                <div class="tbl-av" style="background:${bg}">${u.username.slice(0,2).toUpperCase()}</div>
-                <div><div class="tbl-name">${esc(u.username)}</div><div class="tbl-sub">${esc(u.data_criacao||'—')}</div></div>
+                ${avatarHTML(u,'tbl-av')}
+                <div class="user-cell-copy"><div class="tbl-name" title="${esc(u.username)}">${esc(u.username)}</div><div class="tbl-sub" title="${esc(u.email||('Conta #'+u.id))}">${esc(u.email||('Conta #'+u.id))}</div></div>
             </div></td>
-            <td><span class="badge ${u.role}">${isAdm?'Admin':'User'}</span>${isMe?'<span class="badge me" style="margin-left:.3rem">você</span>':''}</td>
+            <td>${u.segmento_comercial?`<span class="business-segment">${esc(u.segmento_comercial)}</span>`:'<span class="segment-neutral">—</span>'}</td>
+            <td class="number-cell">${Number(u.total_produtos)||0}</td><td class="number-cell">${Number(u.total_vendas)||0}</td><td class="number-cell revenue-cell">${R(u.receita_total)}</td>
             <td>${subBadgeHTML(u)}</td>
-            <td>${u.total_produtos}</td><td>${u.total_vendas}</td><td>${R(u.receita_total)}</td>
+            <td><div class="access-cell"><span class="role-state ${isAdm?'admin':'user'}">${isAdm?'Admin':'Usuário'}</span>${passcode}</div></td>
             <td><div class="tbl-acts">
                 <button class="tbl-btn" onclick="openDetails(${u.id})" title="Detalhes"><span class="material-symbols-outlined">manage_search</span></button>
                 ${!isAdm?`<button class="tbl-btn sub" onclick="openSub(${u.id},'${esc(u.username)}','${u.sub_data_fim||''}','${u.sub_status_calc}')" title="Assinatura"><span class="material-symbols-outlined">card_membership</span></button>`:''}
@@ -2035,7 +2089,15 @@ function renderTable(){
             </div></td>`;
         tb.appendChild(tr);
     });
+    if(!rows.length)tb.innerHTML='<tr><td colspan="8"><div class="empty-state">Nenhuma conta corresponde à busca e aos filtros.</div></td></tr>';
+    $('usersPageSummary').textContent=users.length?`Mostrando ${start+1}–${Math.min(start+PAGE_SIZE,users.length)} de ${users.length} contas`:'Nenhuma conta para exibir';
+    $('usersPageNumber').textContent=`${currentPage} / ${pages}`;
+    $('usersPrev').disabled=currentPage<=1;$('usersNext').disabled=currentPage>=pages;
+    $('userVisibleCount').textContent=users.length.toLocaleString('pt-BR');
 }
+$('usersPrev').addEventListener('click',()=>{if(currentPage>1){currentPage--;viewMode==='list'?renderTable():applyF()}});
+$('usersNext').addEventListener('click',()=>{const pages=Math.max(1,Math.ceil(filteredUsers().length/PAGE_SIZE));if(currentPage<pages){currentPage++;viewMode==='list'?renderTable():applyF()}});
+setView(viewMode);applyF();
 
 /* ══════════════════════════════════════════
    MODAL ASSINATURA
@@ -2101,7 +2163,9 @@ $('modalSub').addEventListener('click', e => { if (e.target === $('modalSub')) $
 /* ══════════════════════════════════════════
    MODAL DETALHES
 ══════════════════════════════════════════ */
+let detailsRequestToken = 0;
 async function openDetails(uid){
+    const requestToken = ++detailsRequestToken;
     if(window.UplarTracker){
         window.UplarTracker.trackEvent('view_user_details', { alvo_user_id: uid }, 'admin');
     }
@@ -2113,19 +2177,19 @@ async function openDetails(uid){
     fd.append('action','get_user_details');fd.append('user_id',uid);fd.append('csrf_token',CSRF);
     let j;
     try{const r=await fetch('admin_usuarios_action.php',{method:'POST',body:fd,credentials:'same-origin'});j=await r.json();}
-    catch(e){$('detBody').innerHTML=`<div class="loading-c"><span style="color:var(--err)">Erro de conexão.</span></div>`;return;}
+    catch(e){if(requestToken!==detailsRequestToken||$('modalDet').style.display!=='flex')return;$('detBody').innerHTML=`<div class="loading-c"><span style="color:var(--err)">Erro de conexão.</span></div>`;return;}
+    if(requestToken!==detailsRequestToken||$('modalDet').style.display!=='flex')return;
     if(!j.ok){$('detBody').innerHTML=`<div class="loading-c"><span style="color:var(--err)">${esc(j.error||'Erro')}</span></div>`;return;}
 
     const u=j.user,em=j.empresa,lg=j.logins,fin=j.financeiro,ul=j.ultimo_login,sub=j.subscription,subH=j.sub_historico||[];
+    const avatarUser=UJ.find(item=>Number(item.id)===Number(u.id))||u;
     const isAdm=u.role==='admin',isMe=u.id==ME_ID;
     const hCls=isMe?'green':isAdm?'violet':'blue';
-    const ini=u.username.slice(0,2).toUpperCase();
-
     $('detHead').innerHTML=`
         <div class="dh ${hCls}">
             <button class="dh-close" onclick="closeDet()"><span class="material-symbols-outlined">close</span></button>
             <div class="dh-top">
-                <div class="dh-av">${ini}</div>
+                ${avatarHTML(avatarUser,'dh-av detail-avatar')}
                 <div>
                     <div class="dh-name">${esc(u.username)}</div>
                     <div class="dh-sub">Cadastrado em ${esc(u.data_criacao||'—')}</div>
@@ -2167,7 +2231,7 @@ async function openDetails(uid){
         });
     });
 }
-function closeDet(){$('modalDet').style.display='none';document.body.style.overflow='';}
+function closeDet(){detailsRequestToken++;$('modalDet').style.display='none';document.body.style.overflow='';}
 $('modalDet').addEventListener('click',e=>{if(e.target===$('modalDet'))closeDet()});
 
 function buildSubBadgeDet(sub){
