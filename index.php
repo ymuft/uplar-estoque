@@ -603,6 +603,7 @@
       .store-demo-cursor { display: none; }
     }
   </style>
+<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261016.1">
 </head>
 
 <body class="bg-white font-sans text-ink antialiased selection:bg-cyan-soft selection:text-navy">
@@ -613,10 +614,7 @@
     <nav class="mx-auto flex h-20 max-w-7xl items-center justify-between px-5 sm:px-8 lg:px-10" aria-label="Navegação principal">
       <div class="flex items-center gap-5">
         <a href="https://estoque.uplar.cloud/" class="flex items-center gap-2.5" aria-label="Uplar Estoque — início">
-          <svg width="30" height="22" viewBox="0 0 28 20" fill="none" aria-hidden="true">
-            <path d="M22.5 8.18C21.77 4.65 18.69 2 15 2C12.09 2 9.52 3.64 8.22 6.18C5.23 6.55 3 9.09 3 12C3 15.31 5.69 18 9 18H22C24.76 18 27 15.76 27 13C27 10.36 24.95 8.22 22.5 8.18Z" fill="#3B6FF5" opacity=".13"/>
-            <path d="M22.5 8.18C21.77 4.65 18.69 2 15 2C12.09 2 9.52 3.64 8.22 6.18C5.23 6.55 3 9.09 3 12C3 15.31 5.69 18 9 18H22C24.76 18 27 15.76 27 13C27 10.36 24.95 8.22 22.5 8.18Z" stroke="#3B6FF5" stroke-width="1.5" stroke-linejoin="round"/>
-          </svg>
+<span class="uplar-brand-mark" aria-hidden="true"><img class="uplar-brand-image" src="assets/brand/uplar-mark-64.png" srcset="assets/brand/uplar-mark-128.png 2x, assets/brand/uplar-mark-256.png 4x" width="64" height="39" alt="" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="uplar-brand-fallback" hidden>U</span></span>
           <span class="font-display text-xl font-extrabold tracking-[-.03em] text-brand">UPLAR</span>
           <span class="h-5 w-px bg-line"></span>
           <span class="font-mono text-[10px] font-medium uppercase tracking-[.18em] text-muted">Estoque</span>
@@ -709,7 +707,7 @@
             <div class="grid min-h-[440px] grid-cols-[66px_1fr] sm:grid-cols-[164px_1fr]">
               <aside class="system-preview-sidebar p-3 sm:p-4">
                 <div class="mb-4 flex items-center gap-2 border-b border-line pb-4 text-ink">
-                  <span class="material-symbols-outlined text-xl text-brand">cloud</span><span class="hidden text-sm font-bold sm:inline">UPLAR</span>
+                  <span class="uplar-brand-mark" aria-hidden="true"><img class="uplar-brand-image" src="assets/brand/uplar-mark-64.png" srcset="assets/brand/uplar-mark-128.png 2x, assets/brand/uplar-mark-256.png 4x" width="64" height="39" alt="" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="uplar-brand-fallback" hidden>U</span></span><span class="hidden text-sm font-bold sm:inline">UPLAR</span>
                 </div>
                 <p class="mb-2 hidden px-2 text-[8px] font-bold uppercase tracking-wider text-[#94A3B8] sm:block">Gestão</p>
                 <div class="space-y-1">
@@ -1208,7 +1206,7 @@
     <div class="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
       <div class="grid gap-10 border-b border-white/10 pb-10 md:grid-cols-[1fr_auto_auto]">
         <div>
-          <a href="https://estoque.uplar.cloud/" class="inline-flex items-center gap-2.5 text-white"><span class="material-symbols-outlined text-[#68A9FF]">cloud</span><span class="font-display text-xl font-extrabold">UPLAR</span><span class="h-5 w-px bg-white/20"></span><span class="font-mono text-[10px] uppercase tracking-[.17em] text-blue-100/55">Estoque</span></a>
+          <a href="https://estoque.uplar.cloud/" class="inline-flex items-center gap-2.5 text-white"><span class="uplar-brand-mark" aria-hidden="true"><img class="uplar-brand-image" src="assets/brand/uplar-mark-64.png" srcset="assets/brand/uplar-mark-128.png 2x, assets/brand/uplar-mark-256.png 4x" width="64" height="39" alt="" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="uplar-brand-fallback" hidden>U</span></span><span class="font-display text-xl font-extrabold">UPLAR</span><span class="h-5 w-px bg-white/20"></span><span class="font-mono text-[10px] uppercase tracking-[.17em] text-blue-100/55">Estoque</span></a>
           <p class="mt-4 max-w-sm text-sm leading-6">Controle de estoque, vendas, equipe e financeiro em uma única plataforma.</p>
         </div>
         <div><p class="mb-4 text-xs font-semibold uppercase tracking-wider text-white">Produto</p><div class="flex flex-col gap-3 text-sm"><a href="#demonstracao" class="transition hover:text-white">O sistema</a><a href="https://estoque.uplar.cloud/planos" class="transition hover:text-white">Planos</a></div></div>

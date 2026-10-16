@@ -71,9 +71,21 @@ function sidebar_link(string $href, string $icon, string $label, string $current
     echo '<span class="sb-link-label">' . htmlspecialchars($label) . '</span>' . $extra . '</a>';
 }
 ?>
+<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261016.1">
 <link rel="stylesheet" href="assets/vendor/driver.css?v=20260724">
 <link rel="stylesheet" href="assets/product-tour.css?v=20260724">
 <style>
+/* Keep account exit reachable above mobile browser controls and bottom navigation. */
+.sb-footer{flex-shrink:0;padding:.65rem;border-top:1px solid var(--border,#e4eaf2);background:var(--card,#fff)}
+.sb-footer .sb-logout{min-height:44px;margin-bottom:0!important}
+@media(max-width:900px){
+    .sb{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+    .sb-head,.sb-user{flex-shrink:0}
+    .sb-nav{flex:1 1 0%;min-height:0;overflow-y:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+    .sb-footer{padding-bottom:calc(.75rem + env(safe-area-inset-bottom,0px))}
+    .sb.open{z-index:500}
+    .overlay.on{z-index:499}
+}
 .sb-av{overflow:hidden}.sb-av-img{display:block;width:100%;height:100%;object-fit:cover;object-position:center}
 .sb-changelog-badge{min-width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;margin-left:auto;padding:0 5px;border-radius:999px;color:#fff;background:#2563eb;font-size:10px;font-weight:800}.sb-changelog-badge[hidden]{display:none}
 .sb-sub-alert{display:block;margin-top:2px;color:#b45309;font-size:.64rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -83,7 +95,7 @@ function sidebar_link(string $href, string $icon, string $label, string $current
 </style>
 <aside class="sb" id="sb" aria-label="Navegação principal">
     <div class="sb-head">
-        <span class="sb-logo-icon material-symbols-outlined" aria-hidden="true">inventory_2</span>
+        <span class="uplar-brand-mark" aria-hidden="true"><img class="uplar-brand-image" src="assets/brand/uplar-mark-64.png" srcset="assets/brand/uplar-mark-128.png 2x, assets/brand/uplar-mark-256.png 4x" width="64" height="39" alt="" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="uplar-brand-fallback" hidden>U</span></span>
         <span class="sb-logo-txt">Uplar</span>
         <button class="sb-theme" id="themeToggle" type="button" aria-label="Ativar modo escuro" title="Alternar tema">
             <span class="material-symbols-outlined" aria-hidden="true">dark_mode</span>
@@ -153,12 +165,14 @@ function sidebar_link(string $href, string $icon, string $label, string $current
 
         <div class="sb-label sb-lbl">Conta</div>
         <?php sidebar_link('config.php', 'settings', 'Configurações', $sidebarPage); ?>
+    </nav>
+    <div class="sb-footer">
         <form action="logout.php" method="POST" id="lf" hidden><?= csrf_input() ?></form>
         <button type="button" class="sb-link sb-logout" id="logoutButton">
             <span class="material-symbols-outlined" aria-hidden="true">logout</span>
             <span class="sb-link-label">Sair</span>
         </button>
-    </nav>
+    </div>
 </aside>
 <div class="profile-modal" id="sidebarProfileModal" role="dialog" aria-modal="true" aria-labelledby="sidebarProfileTitle">
     <div class="profile-box">

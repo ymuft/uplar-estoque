@@ -97,7 +97,7 @@ $previewBackgroundClass = $config['cor_fundo'] !== ''
     <title>Meu Site PRO — Uplar</title>
     <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800;900&family=Cormorant+Garamond:wght@600;700&family=Inter:wght@400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200">
-    <link rel="stylesheet" href="assets/vitrine-image-editor.css?v=20260714">
+    <link rel="stylesheet" href="assets/vitrine-image-editor.css?v=20261015-banner1">
     <link rel="stylesheet" href="assets/app-theme.css?v=20260723">
     <script src="assets/app-theme.js?v=20260723"></script>
     <style>
@@ -1185,7 +1185,7 @@ $previewBackgroundClass = $config['cor_fundo'] !== ''
 </nav>
 
 <script src="assets/cropper.min.js?v=2.1.1"></script>
-<script src="assets/vitrine-image-editor.js?v=20260714"></script>
+<script src="assets/vitrine-image-editor.js?v=20261015-banner1"></script>
 <script>
 const sidebar = document.getElementById('sb');
 const overlay = document.getElementById('ov');

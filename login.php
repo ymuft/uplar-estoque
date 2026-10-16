@@ -13,6 +13,7 @@ if (isset($_SESSION['user_id'])) {
 
 get_csrf_token();
 $turnstile_config = get_turnstile_config();
+$turnstile_enabled = $turnstile_config['enabled'];
 $turnstile_site_key = $turnstile_config['site_key'];
 
 $rate_limited = ($_GET['rate_limited'] ?? '') === '1';
@@ -59,7 +60,7 @@ $blocked_secs = 0;
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
 <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>
+<?php if ($turnstile_enabled): ?><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script><?php endif; ?>
 <style>
 :root{
     --navy:#061a46;--navy-soft:#0a2862;--p:#0877f9;--p-dark:#065fc7;--p-dim:rgba(8,119,249,.09);--p-glow:rgba(8,119,249,.24);
@@ -258,12 +259,13 @@ body{
 @media(min-width:1201px) and (max-width:1360px){.login-index-demo{right:18px;left:315px;transform:translate3d(0,8px,0) scale(.88);transform-origin:top left}}
 @media(max-width:1200px){.login-shell{grid-template-columns:1fr}.login-story{display:none}.login-access{min-height:100vh}.mobile-brand{display:flex}.login-panel{max-width:440px}}
 </style>
+<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261016.1">
 </head>
 <body>
 <div class="login-shell">
     <section class="login-story" aria-label="Visão geral da plataforma Uplar">
         <a class="brand" href="/" aria-label="Voltar para a página inicial da Uplar">
-            <span class="brand-mark"><span class="material-symbols-outlined" aria-hidden="true">cloud</span></span>
+            <span class="uplar-brand-mark" aria-hidden="true"><img class="uplar-brand-image" src="assets/brand/uplar-mark-64.png" srcset="assets/brand/uplar-mark-128.png 2x, assets/brand/uplar-mark-256.png 4x" width="64" height="39" alt="" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="uplar-brand-fallback" hidden>U</span></span>
             <span><span class="brand-name">UPLAR</span><span class="brand-meta">Controle operacional</span></span>
         </a>
 
@@ -322,7 +324,7 @@ body{
                 <div class="login-index-demo">
                     <div class="index-demo-browser"><span></span><span></span><span></span><b>app.uplar.cloud / relatórios</b></div>
                     <div class="index-demo-body">
-                        <aside class="index-demo-sidebar"><div class="index-demo-logo"><span class="material-symbols-outlined">cloud</span>UPLAR</div><small>GESTÃO</small><div class="index-demo-nav is-active"><span class="material-symbols-outlined">bar_chart</span>Relatórios</div><div class="index-demo-nav"><span class="material-symbols-outlined">inventory_2</span>Produtos</div><div class="index-demo-nav"><span class="material-symbols-outlined">receipt_long</span>Pedidos</div><div class="index-demo-nav"><span class="material-symbols-outlined">groups</span>Vendedores</div></aside>
+                        <aside class="index-demo-sidebar"><div class="index-demo-logo"><span class="uplar-brand-mark" aria-hidden="true"><img class="uplar-brand-image" src="assets/brand/uplar-mark-64.png" srcset="assets/brand/uplar-mark-128.png 2x, assets/brand/uplar-mark-256.png 4x" width="64" height="39" alt="" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="uplar-brand-fallback" hidden>U</span></span>UPLAR</div><small>GESTÃO</small><div class="index-demo-nav is-active"><span class="material-symbols-outlined">bar_chart</span>Relatórios</div><div class="index-demo-nav"><span class="material-symbols-outlined">inventory_2</span>Produtos</div><div class="index-demo-nav"><span class="material-symbols-outlined">receipt_long</span>Pedidos</div><div class="index-demo-nav"><span class="material-symbols-outlined">groups</span>Vendedores</div></aside>
                         <div class="index-demo-workspace"><div class="index-demo-head"><div><strong>Relatórios</strong><small>Decisões baseadas no que está acontecendo agora</small></div><em>Últimos 30 dias</em></div><div class="index-demo-kpis"><div><small>Receita</small><b>R$ 42.680</b><i>↑ 18,4%</i></div><div><small>Vendas</small><b>318</b><i>↑ 34 este mês</i></div><div><small>Ticket médio</small><b>R$ 134</b><i>Melhor: R$ 189</i></div></div><div class="index-demo-chart-card"><div class="index-demo-chart-head"><div><b>Desempenho de vendas</b><small>Receita diária · evolução do período</small></div><i>+18,4%</i></div><svg class="index-demo-chart" viewBox="0 0 500 172" preserveAspectRatio="none"><g><line x1="8" y1="24" x2="492" y2="24"></line><line x1="8" y1="70" x2="492" y2="70"></line><line x1="8" y1="116" x2="492" y2="116"></line><line x1="8" y1="162" x2="492" y2="162"></line></g><path class="index-demo-fill" d="M8 148 C47 142 59 127 91 132 S142 107 174 116 S223 80 258 91 S311 54 344 69 S401 39 434 49 S469 24 492 29 V164 H8Z"></path><path class="index-demo-line" d="M8 148 C47 142 59 127 91 132 S142 107 174 116 S223 80 258 91 S311 54 344 69 S401 39 434 49 S469 24 492 29"></path><circle cx="492" cy="29" r="4"></circle></svg><div class="index-demo-insights"><span><b>Camisa esportiva</b>Mais vendido</span><span><b>Quinta-feira</b>Melhor dia</span><span><b>R$ •.•••</b>Pico diário</span></div></div></div>
                     </div>
                 </div>
@@ -335,7 +337,7 @@ body{
     <main class="login-access">
     <div class="login-panel">
         <a class="brand mobile-brand" href="/" aria-label="Voltar para a página inicial da Uplar">
-            <span class="brand-mark"><span class="material-symbols-outlined" aria-hidden="true">cloud</span></span>
+            <span class="uplar-brand-mark" aria-hidden="true"><img class="uplar-brand-image" src="assets/brand/uplar-mark-64.png" srcset="assets/brand/uplar-mark-128.png 2x, assets/brand/uplar-mark-256.png 4x" width="64" height="39" alt="" decoding="async" onerror="this.hidden=true;this.nextElementSibling.hidden=false"><span class="uplar-brand-fallback" hidden>U</span></span>
             <span><span class="brand-name" style="color:var(--navy)">UPLAR</span><span class="brand-meta" style="color:var(--faint)">Controle operacional</span></span>
         </a>
 
@@ -424,13 +426,15 @@ body{
             CapsLock ativado — verifique sua senha
         </div>
 
-        <div class="turnstile-wrap">
-            <div class="cf-turnstile"
-                data-sitekey="<?= attr_escape($turnstile_site_key) ?>"
-                data-action="login"
-                data-theme="light"
-                data-language="pt-BR"></div>
-        </div>
+        <?php if ($turnstile_enabled): ?>
+            <div class="turnstile-wrap">
+                <div class="cf-turnstile"
+                    data-sitekey="<?= attr_escape($turnstile_site_key) ?>"
+                    data-action="login"
+                    data-theme="light"
+                    data-language="pt-BR"></div>
+            </div>
+        <?php endif; ?>
 
         <!-- Submit -->
         <button type="submit" class="btn-login" id="btnLogin" <?= $ip_blocked ? 'disabled' : '' ?>>
@@ -481,8 +485,10 @@ body{
         const hp=$('website');if(hp&&hp.value!==''){e.preventDefault();return;}
         const u=$('username').value.trim(),p=pwIn.value;
         if(!u||!p){e.preventDefault();showErr('Preencha usuário e senha.');return;}
+        <?php if ($turnstile_enabled): ?>
         const turnstile=form.querySelector('[name="cf-turnstile-response"]');
         if(!turnstile||!turnstile.value){e.preventDefault();showErr('Conclua a verificação de segurança.');return;}
+        <?php endif; ?>
         btn.disabled=true;btnIco.style.display='none';btnTxt.textContent='Verificando…';
         const sp=document.createElement('div');sp.className='spinner';btn.insertBefore(sp,btn.firstChild);
         setTimeout(()=>{if(btn.disabled){btn.disabled=false;btnIco.style.display='';btnTxt.textContent='Entrar';sp.remove();}},12000);
