@@ -603,7 +603,7 @@
       .store-demo-cursor { display: none; }
     }
   </style>
-<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261016.1">
+<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261020.1">
 </head>
 
 <body class="bg-white font-sans text-ink antialiased selection:bg-cyan-soft selection:text-navy">

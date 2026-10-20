@@ -71,7 +71,7 @@ function sidebar_link(string $href, string $icon, string $label, string $current
     echo '<span class="sb-link-label">' . htmlspecialchars($label) . '</span>' . $extra . '</a>';
 }
 ?>
-<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261016.1">
+<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261020.1">
 <link rel="stylesheet" href="assets/vendor/driver.css?v=20260724">
 <link rel="stylesheet" href="assets/product-tour.css?v=20260724">
 <style>

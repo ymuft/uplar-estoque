@@ -259,7 +259,7 @@ body{
 @media(min-width:1201px) and (max-width:1360px){.login-index-demo{right:18px;left:315px;transform:translate3d(0,8px,0) scale(.88);transform-origin:top left}}
 @media(max-width:1200px){.login-shell{grid-template-columns:1fr}.login-story{display:none}.login-access{min-height:100vh}.mobile-brand{display:flex}.login-panel{max-width:440px}}
 </style>
-<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261016.1">
+<link rel="stylesheet" href="assets/brand/uplar-brand.css?v=20261020.1">
 </head>
 <body>
 <div class="login-shell">
